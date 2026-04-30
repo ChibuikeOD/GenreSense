@@ -1,0 +1,10 @@
+.venv
+Venv
+__pycache__
+*.pyc
+.streamlit
+tests
+.agents
+.cache
+.git
+UI

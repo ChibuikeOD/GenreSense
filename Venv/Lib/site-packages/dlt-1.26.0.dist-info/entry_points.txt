@@ -1,0 +1,5 @@
+[console_scripts]
+dlt = dlt._workspace.cli._dlt:_main
+
+[dlt]
+dlt = dlt.__plugins__

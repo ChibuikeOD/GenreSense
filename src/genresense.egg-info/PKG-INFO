@@ -1,0 +1,78 @@
+Metadata-Version: 2.4
+Name: genresense
+Version: 0.1.0
+Summary: Spotify library auditing and recommendation pipeline with Streamlit, dlt, and scikit-learn.
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: dlt[postgres]>=1.0.0
+Requires-Dist: pandas>=2.2.0
+Requires-Dist: scikit-learn>=1.5.0
+Requires-Dist: spotipy>=2.25.0
+Requires-Dist: streamlit>=1.44.0
+
+# GenreSense
+
+GenreSense is a Spotify library auditing and recommendation system built as a portfolio-quality machine learning project. The codebase is intentionally split into separate layers for:
+
+- Spotify authentication and acquisition
+- Data loading into PostgreSQL with `dlt`
+- Feature engineering and model preparation
+- Streamlit presentation
+
+## Project layout
+
+```text
+.
+|-- app.py
+|-- pyproject.toml
+|-- src/genresense
+|   |-- auth.py
+|   |-- config.py
+|   |-- features.py
+|   |-- pipeline.py
+|   `-- spotify_client.py
+`-- tests
+    `-- test_features.py
+```
+
+## Local setup
+
+1. Create a virtual environment and install dependencies:
+
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   pip install -e .
+   ```
+
+2. Copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in your Spotify and PostgreSQL credentials.
+
+3. In your Spotify developer dashboard, add the redirect URI from your secrets file to the application configuration.
+
+4. Start the app:
+
+   ```powershell
+   streamlit run app.py
+   ```
+
+## Secrets format
+
+```toml
+[spotify]
+client_id = "your-client-id"
+client_secret = "your-client-secret"
+redirect_uri = "http://localhost:8501"
+scope = "user-library-read"
+
+[postgres]
+dsn = "postgresql://loader:password@localhost:5432/genresense"
+dataset_name = "spotify_audit"
+```
+
+## Day 1 deliverables implemented
+
+- Secure Spotify OAuth using `st.secrets`
+- Saved track and audio feature extraction through Spotipy
+- PostgreSQL ingestion through `dlt` with merge/upsert on `track_id`
+- Audio feature scaling with `StandardScaler`
+

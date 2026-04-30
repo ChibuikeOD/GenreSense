@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>GenreSense - High-Precision Music Intelligence</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-fixed-variant": "#881d28",
+                        "on-error-container": "#93000a",
+                        "outline-variant": "#bccbb9",
+                        "surface-variant": "#e1e3e4",
+                        "primary-fixed-dim": "#53e076",
+                        "inverse-on-surface": "#f0f1f2",
+                        "surface-dim": "#d9dadb",
+                        "on-tertiary": "#ffffff",
+                        "on-error": "#ffffff",
+                        "tertiary-fixed": "#ffdad9",
+                        "on-background": "#191c1d",
+                        "on-surface-variant": "#3d4a3d",
+                        "outline": "#6d7b6c",
+                        "background": "#f8f9fa",
+                        "on-primary-fixed": "#002108",
+                        "on-primary": "#ffffff",
+                        "on-secondary-fixed-variant": "#3c475a",
+                        "surface-bright": "#f8f9fa",
+                        "primary-fixed": "#72fe8f",
+                        "surface": "#f8f9fa",
+                        "on-secondary-fixed": "#111c2d",
+                        "tertiary-fixed-dim": "#ffb3b3",
+                        "on-primary-fixed-variant": "#005320",
+                        "surface-container": "#edeeef",
+                        "on-tertiary-container": "#730a1b",
+                        "primary-container": "#1db954",
+                        "surface-container-low": "#f3f4f5",
+                        "tertiary-container": "#ff767b",
+                        "secondary-container": "#d5e0f8",
+                        "surface-tint": "#006e2d",
+                        "error": "#ba1a1a",
+                        "on-tertiary-fixed": "#400009",
+                        "secondary-fixed-dim": "#bcc7de",
+                        "secondary-fixed": "#d8e3fb",
+                        "surface-container-high": "#e7e8e9",
+                        "primary": "#006e2d",
+                        "tertiary": "#a8353e",
+                        "on-secondary-container": "#586377",
+                        "inverse-primary": "#53e076",
+                        "inverse-surface": "#2e3132",
+                        "surface-container-highest": "#e1e3e4",
+                        "surface-container-lowest": "#ffffff",
+                        "on-secondary": "#ffffff",
+                        "on-surface": "#191c1d",
+                        "error-container": "#ffdad6",
+                        "on-primary-container": "#004118",
+                        "secondary": "#545f73"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "md": "16px",
+                        "lg": "24px",
+                        "xs": "4px",
+                        "margin": "32px",
+                        "xl": "48px",
+                        "max-width": "1200px",
+                        "sm": "8px",
+                        "unit": "4px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "h2": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "label-sm": ["Inter"],
+                        "body-md": ["Inter"],
+                        "h1": ["Inter"],
+                        "h3": ["Inter"]
+                    },
+                    "fontSize": {
+                        "h2": ["24px", {"lineHeight": "1.3", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "body-lg": ["16px", {"lineHeight": "1.6", "letterSpacing": "0", "fontWeight": "400"}],
+                        "label-sm": ["12px", {"lineHeight": "1", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                        "body-md": ["14px", {"lineHeight": "1.5", "letterSpacing": "0", "fontWeight": "400"}],
+                        "h1": ["32px", {"lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "h3": ["18px", {"lineHeight": "1.4", "letterSpacing": "-0.01em", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+            line-height: 1;
+        }
+        body {
+            background-color: #f8f9fa;
+        }
+    </style>
+</head>
+<body class="antialiased text-on-surface selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopNavBar -->
+<header class="bg-white/80 dark:bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-none">
+<div class="flex justify-between items-center h-16 px-6 md:px-12 max-w-[1200px] mx-auto font-['Inter'] antialiased tracking-tight">
+<div class="text-xl font-black tracking-tighter text-slate-900 dark:text-white">
+                GenreSense
+            </div>
+<nav class="hidden md:flex items-center space-x-8">
+<a class="text-[#1DB954] font-semibold border-b-2 border-[#1DB954] pb-1 transition-all duration-200" href="#">Platform</a>
+<a class="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all duration-200" href="#">Features</a>
+<a class="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all duration-200" href="#">Methodology</a>
+<a class="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all duration-200" href="#">Pricing</a>
+</nav>
+<button class="bg-primary-container text-on-primary-container px-5 py-2.5 rounded-full font-semibold text-sm active:scale-[0.98] transition-transform hover:opacity-90 flex items-center gap-2" onclick="console.log('Connecting to Spotify...')">
+<span class="material-symbols-outlined text-[18px]" data-icon="brand_awareness">brand_awareness</span>
+                Connect to Spotify
+            </button>
+</div>
+</header>
+<main>
+<!-- Hero Section -->
+<section class="relative overflow-hidden pt-20 pb-32 px-6">
+<div class="max-w-[1200px] mx-auto flex flex-col items-center text-center">
+<!-- Decorative background elements -->
+<div class="absolute -top-24 -left-24 w-96 h-96 bg-primary-container/5 rounded-full blur-3xl pointer-events-none"></div>
+<div class="absolute -bottom-24 -right-24 w-96 h-96 bg-secondary-container/10 rounded-full blur-3xl pointer-events-none"></div>
+<h1 class="font-h1 text-[48px] md:text-[64px] leading-tight text-slate-900 mb-6 tracking-tight max-w-4xl">
+                    Analyze your Musical Identity.
+                </h1>
+<p class="font-body-lg text-lg md:text-xl text-slate-500 max-w-2xl mb-10">
+                    We use machine learning to audit your listening habits, identify latent genre clusters, and build high-precision recommendations.
+                </p>
+<div class="flex flex-col items-center gap-4">
+<button class="bg-[#1DB954] text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center gap-3 shadow-lg shadow-[#1DB954]/20 hover:translate-y-[-1px] transition-all active:scale-[0.98]" onclick="console.log('Connecting to Spotify...')">
+<span class="material-symbols-outlined" data-icon="music_note" style="font-variation-settings: 'FILL' 1;">music_note</span>
+                        Connect to Spotify
+                    </button>
+<p class="text-xs text-slate-400 max-w-xs font-label-sm">
+                        Security Note: We only access your listening history to generate your profile. No data is shared with third parties.
+                    </p>
+</div>
+<!-- Product Preview Visual -->
+<div class="mt-16 w-full max-w-4xl rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden aspect-video relative group">
+<img alt="GenreSense Dashboard Visualization" class="w-full h-full object-cover" data-alt="abstract high-tech music data visualization with glowing green waveforms and 3D geometric clusters on a dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAvoUVbElzpYAdVs1vGz23zTvo9CtDzu3BRxvcEtBztvE-NNyhjixj_cXU-7-3UALlTz9D2DsniuWt2x09PTlBOkTMj59VEVzpP6tIDiekK1x6BWmwzxlzSh7Ln9nTh_bN8rW0pDto4UxJ6PFMofUzUqTJlQEKmt-IiGz_1gFl0qOJnSbw4l_eepsJABaxTLtG0geE41LImzfQxQIrhS95kNSllZYpJJ2alymJ9_xrkM-338jQTHtNtqs2ZjURu5UV0tkmOzAcNu2Fv"/>
+<div class="absolute inset-0 bg-gradient-to-t from-slate-900/40 to-transparent"></div>
+</div>
+</div>
+</section>
+<!-- Features Grid -->
+<section class="bg-white py-xl px-6 border-y border-slate-200">
+<div class="max-w-[1200px] mx-auto">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-gutter">
+<!-- Card 1 -->
+<div class="p-lg border border-slate-100 rounded-xl hover:border-primary-container/30 transition-all duration-300 group">
+<div class="w-12 h-12 bg-slate-50 rounded-lg flex items-center justify-center mb-md group-hover:bg-primary-container/10 transition-colors">
+<span class="material-symbols-outlined text-slate-600 group-hover:text-primary transition-colors" data-icon="analytics">analytics</span>
+</div>
+<h3 class="font-h3 text-h3 text-slate-900 mb-sm">Acoustic Profiling</h3>
+<p class="font-body-md text-body-md text-slate-500">
+                            We analyze danceability, energy, and valence signatures.
+                        </p>
+</div>
+<!-- Card 2 -->
+<div class="p-lg border border-slate-100 rounded-xl hover:border-primary-container/30 transition-all duration-300 group">
+<div class="w-12 h-12 bg-slate-50 rounded-lg flex items-center justify-center mb-md group-hover:bg-primary-container/10 transition-colors">
+<span class="material-symbols-outlined text-slate-600 group-hover:text-primary transition-colors" data-icon="hub">hub</span>
+</div>
+<h3 class="font-h3 text-h3 text-slate-900 mb-sm">K-Means Clustering</h3>
+<p class="font-body-md text-body-md text-slate-500">
+                            Discover the mathematical genres hidden in your library.
+                        </p>
+</div>
+<!-- Card 3 -->
+<div class="p-lg border border-slate-100 rounded-xl hover:border-primary-container/30 transition-all duration-300 group">
+<div class="w-12 h-12 bg-slate-50 rounded-lg flex items-center justify-center mb-md group-hover:bg-primary-container/10 transition-colors">
+<span class="material-symbols-outlined text-slate-600 group-hover:text-primary transition-colors" data-icon="playlist_add_check">playlist_add_check</span>
+</div>
+<h3 class="font-h3 text-h3 text-slate-900 mb-sm">Dynamic Playlists</h3>
+<p class="font-body-md text-body-md text-slate-500">
+                            Export custom-tuned discovery or pure-genre sets.
+                        </p>
+</div>
+</div>
+</div>
+</section>
+<!-- Technical Deep Dive (Bento Style) -->
+<section class="py-xl px-6 bg-slate-50">
+<div class="max-w-[1200px] mx-auto">
+<div class="grid grid-cols-1 md:grid-cols-12 gap-gutter auto-rows-[200px]">
+<div class="md:col-span-8 md:row-span-2 bg-white border border-slate-200 rounded-xl p-lg flex flex-col justify-end relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-lg opacity-10 group-hover:opacity-20 transition-opacity">
+<span class="material-symbols-outlined text-[120px]" data-icon="waves">waves</span>
+</div>
+<span class="inline-block px-2 py-1 bg-primary-container/10 text-primary font-label-sm rounded mb-sm w-fit uppercase">Precision Engine</span>
+<h2 class="font-h2 text-h2 text-slate-900 mb-md max-w-md">Our algorithm dissects over 40 metadata parameters per track.</h2>
+<p class="font-body-md text-slate-500 max-w-lg">Using high-fidelity spectral analysis and temporal metadata to map your unique sonic fingerprint across the global music landscape.</p>
+</div>
+<div class="md:col-span-4 md:row-span-1 bg-[#1DB954] rounded-xl p-lg flex flex-col justify-between text-white border border-white/10 shadow-sm hover:shadow-md transition-all">
+<span class="material-symbols-outlined" data-icon="verified" style="font-variation-settings: 'FILL' 1;">verified</span>
+<p class="font-h3 text-h3">Trustless Security Architecture</p>
+</div>
+<div class="md:col-span-4 md:row-span-1 bg-white border border-slate-200 rounded-xl p-lg flex flex-col justify-between hover:shadow-sm transition-all">
+<p class="font-label-sm text-slate-400 uppercase tracking-widest">Global Reach</p>
+<p class="font-h2 text-[32px] text-slate-900 font-bold">4.2M+</p>
+<p class="font-body-md text-slate-500">Tracks indexed hourly</p>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+<div class="flex flex-col md:flex-row justify-between items-center py-12 px-6 md:px-12 max-w-[1200px] mx-auto gap-6 font-['Inter'] text-sm text-slate-500 dark:text-slate-400">
+<div class="flex flex-col items-center md:items-start gap-2">
+<div class="text-lg font-bold text-slate-900 dark:text-white">GenreSense</div>
+<div class="text-xs text-slate-500 dark:text-slate-400">© 2024 GenreSense. High-precision music intelligence.</div>
+</div>
+<div class="flex flex-wrap justify-center gap-x-8 gap-y-4">
+<a class="hover:text-[#1DB954] transition-colors cursor-pointer" href="#">Privacy Policy</a>
+<a class="hover:text-[#1DB954] transition-colors cursor-pointer" href="#">Terms of Service</a>
+<a class="hover:text-[#1DB954] transition-colors cursor-pointer" href="#">API Documentation</a>
+<a class="hover:text-[#1DB954] transition-colors cursor-pointer" href="#">Contact Support</a>
+</div>
+<div class="flex gap-4">
+<span class="material-symbols-outlined text-slate-400 hover:text-[#1DB954] cursor-pointer transition-colors" data-icon="language">language</span>
+<span class="material-symbols-outlined text-slate-400 hover:text-[#1DB954] cursor-pointer transition-colors" data-icon="terminal">terminal</span>
+</div>
+</div>
+</footer>
+</body></html>
