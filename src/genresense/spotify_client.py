@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, Callable
 
 import pandas as pd
 import requests
 import spotipy
+import json
+import time
+from pathlib import Path
 
 from genresense.config import RapidApiSettings
 from genresense.schema import AUDIO_FEATURE_COLUMNS
@@ -32,13 +36,61 @@ class SpotifySavedTracksExtractor:
         self.rapidapi = rapidapi
         self.http = requests.Session()
 
-    def extract(self) -> ExtractionResult:
+    #region agent log
+    _DEBUG_LOG_PATH = Path(__file__).resolve().parents[2] / ".logs" / "debug-005787.log"
+    _DEBUG_SESSION_ID = "005787"
+
+    @classmethod
+    def _agent_log(cls, *, hypothesis_id: str, message: str, data: dict[str, Any] | None = None, run_id: str = "pre") -> None:
+        payload = {
+            "sessionId": cls._DEBUG_SESSION_ID,
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": "spotify_client.py",
+            "message": message,
+            "data": data or {},
+            "timestamp": int(time.time() * 1000),
+        }
+        try:
+            with cls._DEBUG_LOG_PATH.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+    #endregion
+
+    def extract(self, progress_callback: Callable[[float, str], None] | None = None) -> ExtractionResult:
+        self._agent_log(
+            hypothesis_id="C",
+            message="extract start",
+            data={
+                "rapidapi_host": self.rapidapi.api_host,
+                "rapidapi_timeout_seconds_type": type(self.rapidapi.timeout_seconds).__name__,
+                "rapidapi_timeout_seconds": str(self.rapidapi.timeout_seconds),
+            },
+        )
+        if progress_callback:
+            progress_callback(0.05, "Fetching saved tracks from Spotify...")
         saved_items = self._fetch_saved_tracks()
+        self._agent_log(hypothesis_id="C", message="saved tracks fetched", data={"items": len(saved_items)})
+        
         valid_items = [item for item in saved_items if item.get("track", {}).get("id")]
         track_ids = [item["track"]["id"] for item in valid_items]
-        audio_features, warning = self._fetch_audio_features(track_ids)
+        
+        if progress_callback:
+            progress_callback(0.20, f"Found {len(track_ids)} tracks. Fetching audio features...")
+            
+        audio_features, warning = self._fetch_audio_features(track_ids, progress_callback)
+        self._agent_log(
+            hypothesis_id="C",
+            message="audio features fetched",
+            data={"track_ids": len(track_ids), "features": len(audio_features), "has_warning": bool(warning)},
+        )
         records = [self._to_record(item, audio_features) for item in valid_items]
         dataframe = build_feature_dataframe(records)
+        
+        if progress_callback:
+            progress_callback(0.90, "Finalizing feature set...")
+            
         return ExtractionResult(records=records, dataframe=dataframe, audio_features_warning=warning)
 
     def _fetch_saved_tracks(self) -> list[dict[str, Any]]:
@@ -48,6 +100,7 @@ class SpotifySavedTracksExtractor:
         max_tracks = 300
 
         while len(items) < max_tracks:
+            self._agent_log(hypothesis_id="C", message="fetch_saved_tracks batch", data={"offset": offset, "limit": limit})
             response = self.client.current_user_saved_tracks(limit=limit, offset=offset)
             batch = response.get("items", [])
             items.extend(batch)
@@ -57,7 +110,11 @@ class SpotifySavedTracksExtractor:
 
         return items[:max_tracks]
 
-    def _fetch_audio_features(self, track_ids: list[str]) -> tuple[dict[str, dict[str, Any]], str | None]:
+    def _fetch_audio_features(
+        self, 
+        track_ids: list[str], 
+        progress_callback: Callable[[float, str], None] | None = None
+    ) -> tuple[dict[str, dict[str, Any]], str | None]:
         features: dict[str, dict[str, Any]] = {}
         if not track_ids:
             return features, None
@@ -69,47 +126,89 @@ class SpotifySavedTracksExtractor:
             "x-rapidapi-host": self.rapidapi.api_host,
         }
         base_url = self.rapidapi.base_url.rstrip("/")
+        batch_size = 5  # max supported by the RapidAPI endpoint
 
-        for track_id in track_ids:
-            url = f"{base_url}/audio-features/{track_id}"
+        # Chunk track_ids into batches
+        batches = [track_ids[i:i + batch_size] for i in range(0, len(track_ids), batch_size)]
+        total_batches = len(batches)
+        self._agent_log(
+            hypothesis_id="C",
+            message="fetch_audio_features start",
+            data={"track_ids": len(track_ids), "batches": total_batches, "timeout_seconds": str(self.rapidapi.timeout_seconds)},
+        )
+        
+        # Track shared state across threads
+        stop_all = False
+        auth_error = None
+        rate_limit_hit = False
+
+        def fetch_batch(batch_idx: int, batch_ids: list[str]):
+            nonlocal stop_all, auth_error, rate_limit_hit
+            if stop_all:
+                return None
+                
+            ids_param = ",".join(batch_ids)
+            url = f"{base_url}/audio-features?ids={ids_param}"
             
             try:
-                response = self.http.get(url, headers=headers, timeout=self.rapidapi.timeout_seconds)
-            except requests.RequestException:
-                failed_requests += 1
-                continue
-
-            if response.status_code == 200:
-                payload = response.json()
-                if isinstance(payload, dict) and payload.get("id"):
-                    features[payload["id"]] = payload
-                else:
-                    failed_requests += 1
-                continue
-
-            if response.status_code in (401, 403):
-                return (
-                    features,
-                    "RapidAPI rejected audio feature requests (401/403). Check your RapidAPI key and subscription status.",
+                # Use isolated requests.get instead of sharing self.http session to avoid connection pool deadlocks
+                resp = requests.get(url, headers=headers, timeout=self.rapidapi.timeout_seconds)
+                if resp.status_code == 200:
+                    return resp.json().get("audio_features", [])
+                
+                # Log non-200 responses for easier debugging
+                cls._agent_log(
+                    hypothesis_id="R",
+                    message="RapidAPI response error",
+                    data={
+                        "status_code": resp.status_code,
+                        "batch_size": len(batch_ids),
+                        "first_id": batch_ids[0] if batch_ids else None
+                    },
+                    run_id="pre"
                 )
-            if response.status_code == 429:
-                warning = "RapidAPI rate limit was reached while fetching audio features; results may be partial."
-                break
 
-            failed_requests += 1
+                if resp.status_code in (401, 403):
+                    auth_error = "RapidAPI rejected audio feature requests (401/403). Check your key."
+                    stop_all = True
+                elif resp.status_code == 429:
+                    rate_limit_hit = True
+                    stop_all = True
+            except requests.RequestException:
+                pass
+            return None
 
-        if warning:
-            return features, warning
+        # Execute batches in parallel (pool size 10)
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            future_to_idx = {executor.submit(fetch_batch, i, b): i for i, b in enumerate(batches)}
+            completed_count = 0
+            
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                batch_data = future.result()
+                
+                if batch_data:
+                    for item in batch_data:
+                        if isinstance(item, dict) and item.get("id"):
+                            features[item["id"]] = item
+                else:
+                    # If we didn't get data and didn't hit a stop-level error, it's just a failed batch
+                    if not stop_all:
+                        failed_requests += len(batches[idx])
+
+                completed_count += 1
+                if progress_callback and not stop_all:
+                    progress = 0.20 + (0.60 * (completed_count / total_batches))
+                    progress_callback(progress, f"Parallel analysis (Batch {completed_count}/{total_batches})...")
+
+        if auth_error:
+            return features, auth_error
+        if rate_limit_hit:
+            return features, "RapidAPI rate limit reached; results are partial."
         if failed_requests and not features:
-            return (
-                {},
-                "RapidAPI audio feature requests failed. Check your network and RapidAPI endpoint configuration.",
-            )
+            return {}, "All RapidAPI requests failed. Check your network."
         if failed_requests:
-            return (
-                features,
-                f"Some RapidAPI audio feature requests failed ({failed_requests} tracks). Results are partially complete.",
-            )
+            return features, f"Some requests failed ({failed_requests} tracks). Results are partial."
 
         return features, None
 

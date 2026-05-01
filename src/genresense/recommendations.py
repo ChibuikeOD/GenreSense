@@ -76,9 +76,10 @@ class MathematicalGenreFinder:
 
         if sample_count == 1:
             frame["cluster_id"] = 0
-            frame["cluster_label"] = "Genre 1"
             frame["centroid_distance"] = 0.0
             summaries = self._summaries_from_frame(frame)
+            label_map = {s.cluster_id: s.label for s in summaries}
+            frame["cluster_label"] = frame["cluster_id"].map(label_map)
             return GenreClusterResult(
                 clustered_frame=frame,
                 summaries=summaries,
@@ -119,9 +120,12 @@ class MathematicalGenreFinder:
         distances = final_model.transform(matrix).min(axis=1)
 
         frame["cluster_id"] = labels.astype(int)
-        frame["cluster_label"] = frame["cluster_id"].map(lambda value: f"Genre {value + 1}")
         frame["centroid_distance"] = distances
         summaries = self._summaries_from_frame(frame)
+
+        # Build a cluster_id -> label lookup from the generated summaries
+        label_map = {s.cluster_id: s.label for s in summaries}
+        frame["cluster_label"] = frame["cluster_id"].map(label_map)
 
         return GenreClusterResult(
             clustered_frame=frame.sort_values(["cluster_id", "centroid_distance", "track_name"]).reset_index(drop=True),
@@ -138,13 +142,16 @@ class MathematicalGenreFinder:
     def _summaries_from_frame(self, frame: pd.DataFrame) -> list[ClusterSummary]:
         summaries: list[ClusterSummary] = []
         total_tracks = max(len(frame), 1)
+        used_labels: set[str] = set()
 
         for cluster_id, cluster_frame in frame.groupby("cluster_id", sort=True):
             top_track = cluster_frame.sort_values("centroid_distance").iloc[0]
+            label = self._infer_genre_label(cluster_frame, used_labels)
+            used_labels.add(label)
             summaries.append(
                 ClusterSummary(
                     cluster_id=int(cluster_id),
-                    label=f"Genre {int(cluster_id) + 1}",
+                    label=label,
                     track_count=int(len(cluster_frame)),
                     share=float(len(cluster_frame) / total_tracks),
                     representative_track=str(top_track.get("track_name") or "Unknown track"),
@@ -155,6 +162,79 @@ class MathematicalGenreFinder:
             )
 
         return summaries
+
+    @staticmethod
+    def _infer_genre_label(cluster_frame: pd.DataFrame, used_labels: set[str]) -> str:
+        """Derive a human-readable genre name from average audio features."""
+        energy = float(cluster_frame["energy"].mean())
+        valence = float(cluster_frame["valence"].mean())
+        tempo = float(cluster_frame["tempo"].mean())
+        acousticness = float(cluster_frame["acousticness"].mean()) if "acousticness" in cluster_frame.columns else 0.0
+        danceability = float(cluster_frame["danceability"].mean()) if "danceability" in cluster_frame.columns else 0.0
+        speechiness = float(cluster_frame["speechiness"].mean()) if "speechiness" in cluster_frame.columns else 0.0
+        instrumentalness = float(cluster_frame["instrumentalness"].mean()) if "instrumentalness" in cluster_frame.columns else 0.0
+
+        # Build descriptors from audio feature thresholds
+        if instrumentalness > 0.5:
+            if energy < 0.4:
+                base = "Ambient"
+            elif tempo > 120:
+                base = "Electronic"
+            else:
+                base = "Instrumental"
+        elif speechiness > 0.33:
+            if energy > 0.7:
+                base = "High-Energy Hip-Hop"
+            elif valence > 0.5:
+                base = "Feel-Good Rap"
+            else:
+                base = "Lyrical Hip-Hop"
+        elif acousticness > 0.6:
+            if valence > 0.5:
+                base = "Acoustic Pop"
+            elif energy < 0.4:
+                base = "Acoustic Ballad"
+            else:
+                base = "Acoustic Indie"
+        elif danceability > 0.7 and energy > 0.7:
+            if valence > 0.6:
+                base = "Dance Pop"
+            else:
+                base = "Club Banger"
+        elif energy > 0.75:
+            if tempo > 140:
+                base = "High-Energy Rock"
+            elif valence > 0.5:
+                base = "Upbeat Pop"
+            else:
+                base = "Intense Anthems"
+        elif energy < 0.35:
+            if valence < 0.3:
+                base = "Melancholic Slow Burn"
+            elif acousticness > 0.4:
+                base = "Lo-Fi Chill"
+            else:
+                base = "Dreamy Downtempo"
+        elif valence > 0.65:
+            base = "Feel-Good Vibes"
+        elif valence < 0.3:
+            base = "Dark & Moody"
+        elif danceability > 0.65:
+            base = "Groovy R&B"
+        elif tempo > 130:
+            base = "Uptempo Drive"
+        else:
+            base = "Mid-Tempo Mix"
+
+        # Deduplicate: if label is already taken, append a distinguishing qualifier
+        if base not in used_labels:
+            return base
+        qualifiers = ["II", "III", "IV", "V"]
+        for q in qualifiers:
+            candidate = f"{base} {q}"
+            if candidate not in used_labels:
+                return candidate
+        return f"{base} ({len(used_labels) + 1})"
 
 
 class PlaylistBuilder:

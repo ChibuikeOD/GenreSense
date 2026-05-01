@@ -7,14 +7,17 @@ import os
 import re
 import secrets
 import sys
+import queue
+import threading
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import pandas as pd
 import spotipy
 from dotenv import load_dotenv
-from flask import Flask, redirect, request, session, url_for
-from spotipy.cache_handler import CacheHandler
+from flask import Flask, redirect, request, session, url_for, Response, stream_with_context
+from spotipy.cache_handler import CacheFileHandler
 from spotipy.oauth2 import SpotifyOAuth
 
 ROOT = Path(__file__).resolve().parent
@@ -34,6 +37,8 @@ load_dotenv(ROOT / ".env", override=True)
 LANDING_TEMPLATE_PATH = ROOT / "UI" / "landing.html"
 TOKEN_INFO_KEY = "spotify_token_info"
 STATE_KEY = "spotify_oauth_state"
+PROFILE_KEY = "spotify_profile"
+SPOTIPY_CACHE_PATH = ROOT / ".spotify_cache"
 
 REQUIRED_ENV_VARS = [
     "SPOTIFY_CLIENT_ID",
@@ -44,23 +49,56 @@ REQUIRED_ENV_VARS = [
     "FLASK_SECRET_KEY",
 ]
 
+#region agent log
+_DEBUG_LOG_PATH = ROOT / ".logs" / "debug-005787.log"
+_DEBUG_SESSION_ID = "005787"
+
+
+def _agent_log(*, hypothesis_id: str, message: str, data: dict[str, Any] | None = None, run_id: str = "pre") -> None:
+    payload = {
+        "sessionId": _DEBUG_SESSION_ID,
+        "runId": run_id,
+        "hypothesisId": hypothesis_id,
+        "location": "app.py",
+        "message": message,
+        "data": data or {},
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        _DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _DEBUG_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+#endregion
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change-me-in-production")
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "true").lower() == "true"
+_agent_log(
+    hypothesis_id="A",
+    message="Flask app configured",
+    data={
+        "session_cookie_secure": bool(app.config.get("SESSION_COOKIE_SECURE")),
+        "session_cookie_samesite": str(app.config.get("SESSION_COOKIE_SAMESITE")),
+        "session_cookie_secure_env": os.environ.get("SESSION_COOKIE_SECURE"),
+    },
+)
 
 
-class FlaskSessionCacheHandler(CacheHandler):
-    def get_cached_token(self) -> Any:
-        return session.get(TOKEN_INFO_KEY)
+# Spotipy's token payload can exceed typical cookie size limits, but Flask's session
+# uses a signed cookie by default. For local dev, keep the token in the session
+# (works if you're using a server-side session extension; otherwise you may hit limits).
 
-    def save_token_to_cache(self, token_info: Any) -> None:
-        session[TOKEN_INFO_KEY] = token_info
 
-    def delete_cached_token(self) -> None:
-        session.pop(TOKEN_INFO_KEY, None)
+def _oauth_cache_handler() -> CacheFileHandler:
+    # Store OAuth tokens server-side to avoid cookie size limits.
+    return CacheFileHandler(cache_path=str(SPOTIPY_CACHE_PATH))
 
+# Store the latest analysis in memory to allow a clean redirect after the streaming pipeline finishes.
+# In a production app, this would be in Redis or a database.
+ANALYSIS_CACHE: dict[str, LibraryAnalysis] = {}
 
 @dataclass
 class LibraryAnalysis:
@@ -108,18 +146,54 @@ def _build_oauth(settings: AppSettings) -> SpotifyOAuth:
         open_browser=False,
         show_dialog=False,
         state=state,
-        cache_handler=FlaskSessionCacheHandler(),
+        cache_handler=_oauth_cache_handler(),
     )
 
 
 def _get_authenticated_client(settings: AppSettings) -> tuple[spotipy.Spotify | None, dict[str, Any] | None]:
+    _t0 = time.time()
+    _agent_log(hypothesis_id="E", message="_get_authenticated_client start", data={}, run_id="pre")
     oauth = _build_oauth(settings)
-    token_info = oauth.validate_token(session.get(TOKEN_INFO_KEY))
+    _t1 = time.time()
+    try:
+        token_info = oauth.validate_token(oauth.cache_handler.get_cached_token())
+        _agent_log(
+            hypothesis_id="E",
+            message="oauth.validate_token returned",
+            data={
+                "elapsed_ms": int((time.time() - _t1) * 1000),
+                "has_token_info": bool(token_info),
+            },
+            run_id="pre",
+        )
+    except Exception as exc:  # noqa: BLE001
+        _agent_log(
+            hypothesis_id="E",
+            message="oauth.validate_token raised",
+            data={"elapsed_ms": int((time.time() - _t1) * 1000), "exc": str(exc)},
+            run_id="pre",
+        )
+        raise
     if not token_info:
+        _agent_log(
+            hypothesis_id="E",
+            message="_get_authenticated_client no token_info",
+            data={"elapsed_ms_total": int((time.time() - _t0) * 1000)},
+            run_id="pre",
+        )
         return None, None
-    session[TOKEN_INFO_KEY] = token_info
-    client = spotipy.Spotify(auth_manager=oauth)
-    profile = client.current_user()
+    # Spotipy uses `requests` under the hood; enforce a finite timeout so
+    # a stuck network call can't hang the Flask request forever.
+    client = spotipy.Spotify(auth_manager=oauth, requests_timeout=20, retries=0)
+
+    # IMPORTANT: avoid calling /v1/me at page-load time (it can 429 and cause loops).
+    profile: dict[str, Any] = {"id": "spotify_user", "display_name": "Spotify user"}
+    _agent_log(
+        hypothesis_id="E",
+        message="_get_authenticated_client done",
+        data={"elapsed_ms_total": int((time.time() - _t0) * 1000)},
+        run_id="pre",
+    )
     return client, profile
 
 
@@ -176,6 +250,15 @@ def _inject_login_into_landing(template: str, login_url: str, status_message: st
     }};
     node.style.cursor = "pointer";
   }});
+
+  // #region agent log
+  window.addEventListener("load", () => {{
+    try {{
+      const img = new Image();
+      img.src = "/__beacon?event=landing_load&ts=" + Date.now();
+    }} catch (e) {{}}
+  }});
+  // #endregion
 }})();
 </script>
 """
@@ -191,6 +274,16 @@ def _inject_login_into_landing(template: str, login_url: str, status_message: st
 
 
 def _render_landing(status_message: str) -> str:
+    _agent_log(
+        hypothesis_id="G",
+        message="render landing",
+        data={
+            "status_message": (status_message or "")[:180],
+            "has_session_token": TOKEN_INFO_KEY in session,
+            "has_session_state": STATE_KEY in session,
+        },
+        run_id="pre",
+    )
     if not LANDING_TEMPLATE_PATH.exists():
         return "<h1>Landing template missing</h1><p>Create UI/landing.html.</p>"
     template = LANDING_TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -239,25 +332,25 @@ def _genre_summary_html(
     options = []
     for summary in cluster_result.summaries:
         is_selected = summary.cluster_id == selected_cluster_id
-        border = "#16a34a" if is_selected else "#dbe4ee"
-        background = "#f0fdf4" if is_selected else "#ffffff"
+        border = "#1db954" if is_selected else "rgba(255,255,255,0.1)"
+        background = "rgba(29, 185, 84, 0.1)" if is_selected else "rgba(0,0,0,0.3)"
         width = max(summary.share * 100.0, 6.0)
         cards.append(
             f"""
-            <div style="border:1px solid {border};border-radius:14px;padding:16px;background:{background};">
+            <div style="border:1px solid {border};border-radius:14px;padding:16px;background:{background};color:#fff;">
               <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
                 <div>
-                  <div style="font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:#64748b;">{html.escape(summary.label)}</div>
-                  <div style="font-size:22px;font-weight:800;margin-top:4px;">{summary.track_count} tracks</div>
+                  <div style="font-size:22px;font-weight:800;">{html.escape(summary.label)}</div>
+                  <div style="font-size:14px;color:#a1a1aa;margin-top:2px;">{summary.track_count} tracks</div>
                 </div>
-                <div style="font-size:12px;color:#475569;">{summary.share * 100:.1f}% of library</div>
+                <div style="font-size:12px;color:#a1a1aa;">{summary.share * 100:.1f}%</div>
               </div>
-              <div style="margin-top:12px;background:#e2e8f0;border-radius:999px;height:12px;overflow:hidden;">
+              <div style="margin-top:12px;background:rgba(255,255,255,0.1);border-radius:999px;height:12px;overflow:hidden;">
                 <div style="width:{width:.2f}%;height:100%;background:linear-gradient(90deg,#16a34a,#22c55e);"></div>
               </div>
-              <div style="margin-top:12px;color:#334155;font-size:13px;line-height:1.6;">
+              <div style="margin-top:12px;color:#e2e8f0;font-size:13px;line-height:1.6;">
                 <strong>Anchor track:</strong> {html.escape(summary.representative_track)}<br>
-                <strong>Energy:</strong> {summary.avg_energy:.2f} &nbsp; <strong>Tempo:</strong> {summary.avg_tempo:.1f} BPM &nbsp; <strong>Valence:</strong> {summary.avg_valence:.2f}
+                <strong>Energy:</strong> {summary.avg_energy:.2f} &nbsp; <strong>Tempo:</strong> {summary.avg_tempo:.1f} BPM
               </div>
             </div>
             """
@@ -268,48 +361,31 @@ def _genre_summary_html(
 
     return f"""
     <section style="margin-top:24px;display:grid;gap:16px;">
-      <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        <div style="border:1px solid #dbe4ee;border-radius:12px;padding:12px 14px;background:#fff;">
-          <div style="font-size:12px;color:#64748b;">Mathematical Genres</div>
-          <div style="font-size:22px;font-weight:800;">{cluster_result.diagnostics.selected_clusters}</div>
-        </div>
-        <div style="border:1px solid #dbe4ee;border-radius:12px;padding:12px 14px;background:#fff;">
-          <div style="font-size:12px;color:#64748b;">Silhouette Score</div>
-          <div style="font-size:22px;font-weight:800;">{score_label}</div>
-        </div>
-      </div>
       <div>
-        <h2 style="margin:0 0 6px;">Mathematical Genres</h2>
-        <p style="margin:0;color:#475569;line-height:1.6;">K-Means grouped your songs by how they sound, not by Spotify metadata labels. Higher silhouette scores mean the discovered genres are more distinct.</p>
+        <h2 style="margin:0 0 6px;color:#fff;">Mathematical Genres</h2>
+        <p style="margin:0;color:#a1a1aa;line-height:1.6;">K-Means grouped your songs by how they sound, not by Spotify metadata labels. Each cluster represents a distinct sonic profile.</p>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;">
         {''.join(cards)}
       </div>
-      <div style="border:1px solid #dbe4ee;border-radius:16px;padding:18px;background:#fff;">
-        <h3 style="margin:0 0 8px;">Generate Playlist</h3>
-        <p style="margin:0 0 14px;color:#475569;line-height:1.6;">Pick one mathematical genre for a pure lane, or let the SentiLink hybrid mode walk into nearby clusters using cosine similarity across tempo and energy.</p>
+      <div style="border:1px solid rgba(255,255,255,0.1);border-radius:16px;padding:18px;background:rgba(0,0,0,0.3);color:#fff;">
+        <h3 style="margin:0 0 8px;color:#fff;">Generate Playlist</h3>
+        <p style="margin:0 0 14px;color:#a1a1aa;line-height:1.6;">Select a mathematical genre to generate a high-precision pure lane playlist.</p>
         <form method="post" action="/generate-playlist" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end;">
-          <label style="display:grid;gap:6px;font-size:13px;color:#475569;">
+          <input type="hidden" name="playlist_mode" value="pure">
+          <label style="display:grid;gap:6px;font-size:13px;color:#a1a1aa;">
             Mathematical Genre
-            <select name="cluster_id" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;">
+            <select name="cluster_id" style="padding:10px 12px;border:1px solid rgba(255,255,255,0.2);border-radius:10px;background:#1e293b;color:#fff;">
               {''.join(options)}
             </select>
           </label>
-          <label style="display:grid;gap:6px;font-size:13px;color:#475569;">
-            Playlist Type
-            <select name="playlist_mode" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;">
-              <option value="pure"{" selected" if selected_playlist_mode == "pure" else ""}>Pure Playlist</option>
-              <option value="hybrid"{" selected" if selected_playlist_mode == "hybrid" else ""}>SentiLink Hybrid</option>
-              <option value="discovery"{" selected" if selected_playlist_mode == "discovery" else ""}>True Discovery</option>
-            </select>
-          </label>
-          <label style="display:grid;gap:6px;font-size:13px;color:#475569;">
+          <label style="display:grid;gap:6px;font-size:13px;color:#a1a1aa;">
             Track Count
-            <input name="playlist_size" type="number" min="5" max="50" value="{selected_playlist_size}" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;">
+            <input name="playlist_size" type="number" min="5" max="50" value="{selected_playlist_size}" style="padding:10px 12px;border:1px solid rgba(255,255,255,0.2);border-radius:10px;background:#1e293b;color:#fff;">
           </label>
-          <label style="display:grid;gap:6px;font-size:13px;color:#475569;">
+          <label style="display:grid;gap:6px;font-size:13px;color:#a1a1aa;">
             Visibility
-            <select name="playlist_visibility" style="padding:10px 12px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;">
+            <select name="playlist_visibility" style="padding:10px 12px;border:1px solid rgba(255,255,255,0.2);border-radius:10px;background:#1e293b;color:#fff;">
               <option value="private"{" selected" if selected_visibility == "private" else ""}>Private</option>
               <option value="public"{" selected" if selected_visibility == "public" else ""}>Public</option>
             </select>
@@ -327,9 +403,15 @@ def _build_scaled_preview(cluster_result: GenreClusterResult) -> pd.DataFrame:
     return cluster_result.clustered_frame[preview_columns]
 
 
-def _analyze_library(settings: AppSettings, client: spotipy.Spotify, *, load_to_db: bool) -> LibraryAnalysis:
+def _analyze_library(
+    settings: AppSettings, 
+    client: spotipy.Spotify, 
+    *, 
+    load_to_db: bool,
+    progress_callback: Callable[[float, str], None] | None = None
+) -> LibraryAnalysis:
     extractor = SpotifySavedTracksExtractor(client, settings.rapidapi)
-    extraction = extractor.extract()
+    extraction = extractor.extract(progress_callback)
     if extraction.dataframe.empty:
         return LibraryAnalysis(
             records_loaded=0,
@@ -342,6 +424,8 @@ def _analyze_library(settings: AppSettings, client: spotipy.Spotify, *, load_to_
 
     load_result = None
     if load_to_db:
+        if progress_callback:
+            progress_callback(0.92, "Syncing to Postgres database...")
         pipeline = SpotifyLibraryPipeline(settings.postgres)
         load_result = pipeline.load_saved_tracks(extraction.records)
 
@@ -350,12 +434,17 @@ def _analyze_library(settings: AppSettings, client: spotipy.Spotify, *, load_to_
     scaled_preview: pd.DataFrame | None = None
 
     try:
+        if progress_callback:
+            progress_callback(0.95, "Running K-Means cluster analysis...")
         normalizer = FeatureNormalizer()
         feature_set = normalizer.fit_transform(extraction.dataframe)
         cluster_result = MathematicalGenreFinder().fit(feature_set)
         scaled_preview = _build_scaled_preview(cluster_result)
     except (FeatureEngineeringError, RecommendationError) as exc:
         warning_message = f"{warning_message} {exc}".strip() if warning_message else str(exc)
+
+    if progress_callback:
+        progress_callback(1.0, "Analysis complete!")
 
     return LibraryAnalysis(
         records_loaded=load_result.loaded_rows if load_result is not None else len(extraction.records),
@@ -387,14 +476,14 @@ def _dashboard_html(
 ) -> str:
     alerts: list[str] = []
     if info:
-        alerts.append(f'<div style="background:#ecfeff;border:1px solid #a5f3fc;padding:12px;border-radius:8px;">{html.escape(info)}</div>')
+        alerts.append(f'<div style="background:#ecfeff;border:1px solid #a5f3fc;padding:12px;border-radius:8px;color:#000;">{html.escape(info)}</div>')
     if warning:
         alerts.append(
-            f'<div style="background:#fffbeb;border:1px solid #fde68a;padding:12px;border-radius:8px;">{html.escape(warning)}</div>'
+            f'<div style="background:#fffbeb;border:1px solid #fde68a;padding:12px;border-radius:8px;color:#000;">{html.escape(warning)}</div>'
         )
     if error:
         alerts.append(
-            f'<div style="background:#fef2f2;border:1px solid #fecaca;padding:12px;border-radius:8px;">{html.escape(error)}</div>'
+            f'<div style="background:#fef2f2;border:1px solid #fecaca;padding:12px;border-radius:8px;color:#000;">{html.escape(error)}</div>'
         )
     
     if generated_playlist_tracks is not None:
@@ -419,23 +508,6 @@ def _dashboard_html(
         alerts.append(generated_list_html)
 
     metric_html = ""
-    if loaded_rows is not None and dataset_name is not None:
-        metric_html = f"""
-        <div style="display:flex;gap:12px;flex-wrap:wrap;margin:14px 0 18px;">
-          <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:#fff;">
-            <div style="font-size:12px;color:#6b7280;">Saved Tracks Loaded</div>
-            <div style="font-size:18px;font-weight:700;">{loaded_rows}</div>
-          </div>
-          <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:#fff;">
-            <div style="font-size:12px;color:#6b7280;">Dataset</div>
-            <div style="font-size:18px;font-weight:700;">{html.escape(dataset_name)}</div>
-          </div>
-          <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:#fff;">
-            <div style="font-size:12px;color:#6b7280;">Tracks With Features</div>
-            <div style="font-size:18px;font-weight:700;">{len(scaled_preview) if scaled_preview is not None else 0}</div>
-          </div>
-        </div>
-        """
 
     viz_html = ""
     if cluster_result is not None and not cluster_result.clustered_frame.empty:
@@ -444,12 +516,27 @@ def _dashboard_html(
         chart_data = viz_data[["track_name", "artist_name", "cluster_id", "valence", "energy"]].to_dict(orient="records")
         chart_json = json.dumps(chart_data)
         
+        legend_items = []
+        for summary in cluster_result.summaries:
+            color = ['#10b981', '#a78bfa'][summary.cluster_id % 2]
+            legend_items.append(f'<div style="display:flex;align-items:center;gap:6px;"><div style="width:10px;height:10px;border-radius:50%;background:{color};box-shadow:0 0 5px {color};"></div><span style="font-size:11px;color:#94a3b8;">{html.escape(summary.label)}</span></div>')
+        
         viz_html = f"""
-        <div class="card" style="background:#0f172a; border-color:#334155; padding:20px; overflow:hidden; margin-top:20px; border-radius:12px;">
-          <h2 style="margin:0 0 16px; color:#f8fafc; font-size:16px; border-bottom:1px solid #334155; padding-bottom:10px;">
-            Acoustic Landscape (KNN Visualizer)
-          </h2>
-          <div style="position:relative; width:100%; height:400px; background:radial-gradient(circle at center, #1e293b 0%, #0f172a 100%); border-radius:8px; border:1px solid #334155; overflow:hidden;" id="knn-container">
+        <div class="card" id="knn-card" style="background:rgba(0,0,0,0.3); border-color:rgba(255,255,255,0.1); padding:20px; overflow:hidden; margin-top:20px; border-radius:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:1px solid rgba(255,255,255,0.1);padding-bottom:10px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <h2 style="margin:0; color:#f8fafc; font-size:20px; font-weight:800;">
+                Your Acoustic Landscape
+              </h2>
+              <button onclick="shareLandscape()" class="btn" style="background:#1db954; color:#000; font-size:12px; padding:4px 10px; display:flex; align-items:center; gap:4px; border:0; cursor:pointer; border-radius:6px; font-weight:700;">
+                <span class="material-symbols-outlined" style="font-size:16px;">share</span> Share
+              </button>
+            </div>
+            <div style="display:flex;gap:14px;">
+              {''.join(legend_items)}
+            </div>
+          </div>
+          <div style="position:relative; width:100%; height:400px; background:radial-gradient(circle at center, #111827 0%, #000 100%); border-radius:8px; border:1px solid rgba(255,255,255,0.1); overflow:hidden;" id="knn-container">
             <!-- Grid lines -->
             <div style="position:absolute; top:50%; left:0; right:0; height:1px; background:rgba(255,255,255,0.05);"></div>
             <div style="position:absolute; top:0; bottom:0; left:50%; width:1px; background:rgba(255,255,255,0.05);"></div>
@@ -554,6 +641,52 @@ def _dashboard_html(
             }}
             
             tick();
+
+            window.shareLandscape = async function() {{
+              const card = document.getElementById('knn-card');
+              const btn = event.currentTarget;
+              const originalText = btn.innerHTML;
+              
+              try {{
+                btn.innerHTML = 'Capturing...';
+                btn.disabled = true;
+                
+                const canvas = await html2canvas(card, {{
+                  backgroundColor: '#064e3b',
+                  scale: 2,
+                  useCORS: true,
+                  logging: false
+                }});
+                
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+                const file = new File([blob], 'my-acoustic-landscape.png', {{ type: 'image/png' }});
+                
+                if (navigator.share && navigator.canShare && navigator.canShare({{ files: [file] }})) {{
+                  await navigator.share({{
+                    title: 'My Acoustic Landscape',
+                    text: 'Check out my musical identity on GenreSense! 🎵',
+                    url: window.location.origin,
+                    files: [file]
+                  }});
+                }} else {{
+                  // Fallback for desktop: Download + copy link
+                  const url = canvas.toDataURL('image/png');
+                  const link = document.createElement('a');
+                  link.download = 'my-acoustic-landscape.png';
+                  link.href = url;
+                  link.click();
+                  
+                  await navigator.clipboard.writeText(window.location.origin);
+                  alert('Landscape downloaded! Share it on social media with this link: ' + window.location.origin + ' (Link copied to clipboard)');
+                }}
+              }} catch (err) {{
+                console.error('Share failed:', err);
+                alert('Could not share. You can try taking a screenshot!');
+              }} finally {{
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+              }}
+            }};
           }})();
         </script>
         """
@@ -584,16 +717,19 @@ def _dashboard_html(
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>GenreSense Dashboard</title>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
       <style>
-        body {{ font-family: Inter, Arial, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }}
+        body {{ font-family: Inter, Arial, sans-serif; margin: 0; background: #064e3b; color: #fff; }}
         .wrap {{ max-width: 1100px; margin: 0 auto; padding: 26px 18px 42px; }}
-        .top {{ display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }}
-        .btn {{ display:inline-block; padding:10px 14px; border-radius:8px; text-decoration:none; font-weight:600; }}
-        .btn-primary {{ background:#16a34a; color:#fff; border:0; cursor:pointer; }}
-        .btn-outline {{ border:1px solid #cbd5e1; color:#0f172a; background:#fff; }}
-        table {{ width:100%; border-collapse: collapse; background:#fff; border:1px solid #e5e7eb; border-radius: 8px; overflow:hidden; }}
-        th, td {{ padding: 8px 10px; border-bottom: 1px solid #eef2f7; font-size: 13px; text-align: left; }}
-        th {{ background: #f8fafc; font-weight: 600; }}
+        .top {{ display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 20px; margin-bottom: 20px; }}
+        .btn {{ display:inline-block; padding:10px 14px; border-radius:8px; text-decoration:none; font-weight:600; transition: all 0.2s; }}
+        .btn-primary {{ background:#1db954; color:#000; border:0; cursor:pointer; }}
+        .btn-primary:hover {{ background:#1ed760; transform: translateY(-1px); }}
+        .btn-outline {{ border:1px solid rgba(255,255,255,0.2); color:#fff; background:transparent; }}
+        .btn-outline:hover {{ background:rgba(255,255,255,0.05); }}
+        table {{ width:100%; border-collapse: collapse; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.1); border-radius: 8px; overflow:hidden; color:#fff; }}
+        th, td {{ padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; text-align: left; }}
+        th {{ background: rgba(0,0,0,0.2); font-weight: 600; color: #1db954; }}
         .node {{
             position: absolute;
             width: 8px;
@@ -615,15 +751,15 @@ def _dashboard_html(
             bottom: 15px;
             left: 50%;
             transform: translateX(-50%);
-            background: #1e293b;
-            border: 1px solid #334155;
+            background: #000;
+            border: 1px solid rgba(255,255,255,0.2);
             color: #fff;
             padding: 8px 10px;
             border-radius: 6px;
             font-size: 11px;
             white-space: nowrap;
             transition: opacity 0.2s ease, bottom 0.2s ease;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
             pointer-events: none;
         }}
         .node:hover .node-tooltip {{
@@ -635,12 +771,12 @@ def _dashboard_html(
     </head>
     <body>
       <div class="wrap">
+        <div style="text-align:center; margin-bottom:32px;">
+          <h1 style="margin:0; font-size:42px; font-weight:900; letter-spacing:-0.04em; color:#fff;">GenreSense</h1>
+          <p style="margin:8px 0 0; color:#a1a1aa; font-size:14px;">Authenticated as {html.escape(profile.get("display_name") or profile.get("id") or "Spotify user")}.</p>
+        </div>
         <div class="top">
-          <div>
-            <h1 style="margin:0;">GenreSense</h1>
-            <p style="margin:6px 0 0;color:#475569;">Authenticated as {html.escape(profile.get("display_name") or profile.get("id") or "Spotify user")}.</p>
-          </div>
-          <div style="display:flex;gap:10px;">
+          <div style="display:flex;gap:10px;justify-content:flex-end;width:100%;">
             <a class="btn btn-outline" href="/logout">Disconnect</a>
             <form method="post" action="/run-pipeline" style="margin:0;">
               <button class="btn btn-primary" type="submit">Refresh Mathematical Genres</button>
@@ -650,73 +786,123 @@ def _dashboard_html(
         <div style="margin-top:14px;display:grid;gap:10px;">
           {''.join(alerts)}
         </div>
-        {metric_html}
-        {viz_html}
         {genre_html}
-        {raw_table}
-        {scaled_table}
+        {viz_html}
       </div>
     </body>
     </html>
     """
 
 
-def _starting_pipeline_html(profile: dict[str, Any]) -> str:
+def _starting_pipeline_html(profile: dict[str, Any], auto_submit: bool = False) -> str:
     display_name = profile.get("display_name") or profile.get("id") or "Spotify user"
+    
+    auto_submit_html = ""
+    if auto_submit:
+        auto_submit_html = """
+        <form id="start-process-form" method="post" action="/run-pipeline" style="display:none;"></form>
+        <script>
+          window.addEventListener("load", () => {
+            const form = document.getElementById("start-process-form");
+            if (form) form.submit();
+          });
+        </script>
+        """
+
     return f"""
     <!doctype html>
     <html lang="en">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
-      <title>Starting GenreSense</title>
+      <title>Analyzing Library - GenreSense</title>
       <style>
-        body {{ font-family: Inter, Arial, sans-serif; margin: 0; background: linear-gradient(180deg, #f8fafc 0%, #ecfdf5 100%); color: #0f172a; }}
+        body {{ font-family: Inter, Arial, sans-serif; margin: 0; background: #064e3b; color: #fff; }}
         .wrap {{ min-height: 100vh; display: grid; place-items: center; padding: 24px; }}
-        .card {{ width: min(560px, 100%); background: rgba(255, 255, 255, 0.96); border: 1px solid #d1fae5; border-radius: 20px; padding: 32px; box-shadow: 0 18px 50px rgba(15, 23, 42, 0.08); }}
-        .pill {{ display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 13px; font-weight: 700; letter-spacing: 0.01em; }}
-        .spinner {{ width: 18px; height: 18px; border-radius: 999px; border: 2px solid #86efac; border-top-color: #16a34a; animation: spin 0.85s linear infinite; }}
-        .btn {{ display:inline-block; padding:12px 18px; border-radius:10px; text-decoration:none; font-weight:700; border:0; cursor:pointer; }}
-        .btn-primary {{ background:#16a34a; color:#fff; }}
-        .btn-outline {{ background:#fff; border:1px solid #cbd5e1; color:#0f172a; }}
+        .card {{ width: min(560px, 100%); background: #000; border: 1px solid rgba(255,255,255,0.1); border-radius: 20px; padding: 40px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }}
+        .progress-container {{ width: 100%; height: 8px; background: #1e293b; border-radius: 999px; margin: 24px 0; overflow: hidden; }}
+        #progress-bar {{ width: 5%; height: 100%; background: #1db954; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); box-shadow: 0 0 15px rgba(29, 185, 84, 0.5); }}
+        .status-text {{ font-size: 14px; color: #94a3b8; font-weight: 500; min-height: 20px; }}
+        .spinner {{ width: 24px; height: 24px; border-radius: 999px; border: 3px solid rgba(29, 185, 84, 0.2); border-top-color: #1db954; animation: spin 0.8s linear infinite; }}
         @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
       </style>
     </head>
     <body>
-      <div class="wrap">
-        <div class="card">
-          <div class="pill">
-            <span class="spinner" aria-hidden="true"></span>
-            Spotify connected
+      <div class="wrap" id="main-content">
+        <div class="card" id="progress-card">
+          <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <div class="spinner"></div>
+            <div style="font-weight: 800; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: #1db954;">Processing Taste Engine</div>
           </div>
-          <h1 style="margin:18px 0 10px;font-size:34px;line-height:1.1;">Starting your GenreSense process...</h1>
-          <p style="margin:0 0 10px;color:#475569;line-height:1.6;">
-            Signed in as {html.escape(display_name)}. We're moving you straight into saved-track ingestion and feature prep now.
-          </p>
-          <p style="margin:0 0 24px;color:#64748b;font-size:14px;line-height:1.6;">
-            If the process does not begin automatically, use the button below.
-          </p>
-          <form id="start-process-form" method="post" action="/run-pipeline" style="display:flex;gap:12px;flex-wrap:wrap;">
-            <button class="btn btn-primary" type="submit">Start Process</button>
-            <a class="btn btn-outline" href="/">Back to Dashboard</a>
-          </form>
+          <h1 style="margin:0 0 8px; font-size:28px; font-weight: 800; letter-spacing: -0.02em;">Auditing your library...</h1>
+          <p style="margin:0; color:#94a3b8; font-size:15px; line-height: 1.6;">Extracting audio features and identifying behavioral patterns.</p>
+          
+          <div class="progress-container">
+            <div id="progress-bar"></div>
+          </div>
+          
+          <div class="status-text" id="status-message">Initializing Spotify connection...</div>
         </div>
       </div>
+
+      {auto_submit_html}
+
       <script>
+        function updateProgress(percent, message) {{
+          const bar = document.getElementById('progress-bar');
+          const status = document.getElementById('status-message');
+          if (bar) bar.style.width = percent + '%';
+          if (status) status.innerText = message;
+        }}
+
+        // #region agent log
         window.addEventListener("load", () => {{
-          const form = document.getElementById("start-process-form");
-          if (form) {{
-            form.requestSubmit();
-          }}
+          try {{
+            const img = new Image();
+            img.src = "/__beacon?event=start_load&ts=" + Date.now();
+          }} catch (e) {{}}
         }});
+        // #endregion
       </script>
     </body>
     </html>
     """
 
 
+@app.get("/__beacon")
+def beacon() -> Any:
+    # region agent log
+    event = request.args.get("event", "unknown")
+    _agent_log(
+        hypothesis_id="F",
+        message="beacon",
+        data={
+            "event": event,
+            "ua": request.headers.get("User-Agent", "")[:120],
+            "referer": request.headers.get("Referer"),
+            "has_session_token": TOKEN_INFO_KEY in session,
+        },
+        run_id="pre",
+    )
+    # endregion
+    return ("", 204)
+
+
 @app.get("/")
 def index() -> Any:
+    _agent_log(
+        hypothesis_id="A",
+        message="GET / entry",
+        data={
+            "args_keys": sorted(list(request.args.keys())),
+            "has_code": "code" in request.args,
+            "has_error": "error" in request.args,
+            "has_session_token": TOKEN_INFO_KEY in session,
+            "has_session_state": STATE_KEY in session,
+            "request_is_secure": bool(getattr(request, "is_secure", False)),
+            "scheme": request.scheme,
+        },
+    )
     try:
         settings = _settings_from_env()
     except ConfigurationError as exc:
@@ -735,6 +921,16 @@ def index() -> Any:
 
 @app.get("/login")
 def login() -> Any:
+    _agent_log(
+        hypothesis_id="G",
+        message="GET /login entry",
+        data={
+            "has_session_state": STATE_KEY in session,
+            "has_session_token": TOKEN_INFO_KEY in session,
+            "scheme": request.scheme,
+        },
+        run_id="pre",
+    )
     try:
         settings = _settings_from_env()
     except ConfigurationError as exc:
@@ -742,11 +938,35 @@ def login() -> Any:
 
     session[STATE_KEY] = secrets.token_urlsafe(16)
     oauth = _build_oauth(settings)
-    return redirect(oauth.get_authorize_url())
+    authorize_url = oauth.get_authorize_url()
+    _agent_log(
+        hypothesis_id="G",
+        message="redirecting to spotify authorize",
+        data={
+            "redirect_uri": settings.spotify.redirect_uri,
+            "scope": settings.spotify.scope,
+            "state_set": bool(session.get(STATE_KEY)),
+        },
+        run_id="pre",
+    )
+    return redirect(authorize_url)
 
 
 @app.get("/callback")
 def callback() -> Any:
+    _agent_log(
+        hypothesis_id="G",
+        message="GET /callback entry",
+        data={
+            "args_keys": sorted(list(request.args.keys())),
+            "has_code": bool(request.args.get("code")),
+            "has_error": bool(request.args.get("error")),
+            "remote_state_present": bool(request.args.get("state")),
+            "local_state_present": bool(session.get(STATE_KEY)),
+            "scheme": request.scheme,
+        },
+        run_id="pre",
+    )
     try:
         settings = _settings_from_env()
     except ConfigurationError as exc:
@@ -755,33 +975,58 @@ def callback() -> Any:
     error = request.args.get("error")
     if error:
         session["status_message"] = f"Spotify authorization failed: {error}"
+        _agent_log(hypothesis_id="G", message="callback error param", data={"error": error}, run_id="pre")
         return redirect(url_for("index"))
 
     remote_state = request.args.get("state")
     local_state = session.get(STATE_KEY)
     if local_state and remote_state and local_state != remote_state:
         session["status_message"] = "Spotify authorization failed: state mismatch."
+        _agent_log(
+            hypothesis_id="G",
+            message="callback state mismatch",
+            data={"local_state_prefix": str(local_state)[:6], "remote_state_prefix": str(remote_state)[:6]},
+            run_id="pre",
+        )
         return redirect(url_for("index"))
 
     code = request.args.get("code")
     if not code:
         session["status_message"] = "Spotify authorization failed: callback code was missing."
+        _agent_log(hypothesis_id="G", message="callback missing code", data={}, run_id="pre")
         return redirect(url_for("index"))
 
     oauth = _build_oauth(settings)
     try:
+        _t_tok = time.time()
         token_info = oauth.get_access_token(code=code, check_cache=False)
     except Exception as exc:  # noqa: BLE001
         session["status_message"] = f"Spotify token exchange failed: {exc}"
+        _agent_log(hypothesis_id="G", message="token exchange failed", data={"exc": str(exc)}, run_id="pre")
         return redirect(url_for("index"))
 
-    session[TOKEN_INFO_KEY] = token_info
+    try:
+        oauth.cache_handler.save_token_to_cache(token_info)
+    except Exception as exc:  # noqa: BLE001
+        session["status_message"] = f"Spotify token storage failed: {exc}"
+        _agent_log(hypothesis_id="G", message="token storage failed", data={"exc": str(exc)}, run_id="pre")
+        return redirect(url_for("index"))
     session["status_message"] = "Spotify connected successfully. Starting ingestion and feature prep."
+    _agent_log(hypothesis_id="G", message="callback stored token in session", data={}, run_id="pre")
     return redirect(url_for("start_process"))
 
 
 @app.get("/start")
 def start_process() -> Any:
+    _agent_log(
+        hypothesis_id="B",
+        message="GET /start entry",
+        data={
+            "has_session_token": TOKEN_INFO_KEY in session,
+            "has_session_state": STATE_KEY in session,
+            "scheme": request.scheme,
+        },
+    )
     try:
         settings = _settings_from_env()
     except ConfigurationError as exc:
@@ -792,12 +1037,17 @@ def start_process() -> Any:
         session["status_message"] = "Connect your Spotify account to start the process."
         return redirect(url_for("index"))
 
-    return _starting_pipeline_html(profile)
+    return _starting_pipeline_html(profile, auto_submit=True)
 
 
 @app.get("/logout")
 def logout() -> Any:
-    session.pop(TOKEN_INFO_KEY, None)
+    try:
+        if SPOTIPY_CACHE_PATH.exists():
+            SPOTIPY_CACHE_PATH.unlink()
+    except Exception:
+        pass
+    session.pop(PROFILE_KEY, None)
     session.pop(STATE_KEY, None)
     session["status_message"] = "Disconnected from Spotify."
     return redirect(url_for("index"))
@@ -805,6 +1055,15 @@ def logout() -> Any:
 
 @app.post("/run-pipeline")
 def run_pipeline() -> Any:
+    print("DEBUG: POST /run-pipeline entered")
+    _agent_log(
+        hypothesis_id="C",
+        message="POST /run-pipeline entry",
+        data={
+            "has_session_token": TOKEN_INFO_KEY in session,
+            "scheme": request.scheme,
+        },
+    )
     try:
         settings = _settings_from_env()
     except ConfigurationError as exc:
@@ -815,30 +1074,120 @@ def run_pipeline() -> Any:
         session["status_message"] = "Your Spotify session expired. Please connect again."
         return redirect(url_for("index"))
 
-    try:
-        analysis = _analyze_library(settings, client, load_to_db=True)
-    except spotipy.SpotifyException as exc:
-        return _dashboard_html(profile, error=f"Spotify API request failed ({exc.http_status}).")
-    except Exception as exc:  # noqa: BLE001
-        return _dashboard_html(profile, error=f"Unexpected pipeline error: {exc}")
+    def generate():
+        _agent_log(hypothesis_id="C", message="pipeline stream generator start", data={}, run_id="pre")
+        # Yield the starting HTML (without auto-submit) and pad to force browser flush
+        yield _starting_pipeline_html(profile, auto_submit=False) + (" " * 4096) + "\n"
 
-    if analysis.raw_preview.empty:
-        return _dashboard_html(profile, warning="No saved tracks were found for this Spotify account.")
+        q = queue.Queue()
+        
+        def progress_callback(percent: float, message: str):
+            # Push script tags to the queue instead of yielding
+            q.put(f"<script>updateProgress({percent * 100}, {json.dumps(message)});</script>\n")
 
-    info_message = "Pipeline completed successfully."
-    if analysis.audio_features_warning:
-        info_message = "Pipeline completed with partial audio-feature coverage."
+        def worker():
+            try:
+                with app.app_context():
+                    _agent_log(hypothesis_id="C", message="pipeline worker start", data={}, run_id="pre")
+                    try:
+                        # Run the heavy lifting in this background thread
+                        res = _analyze_library(settings, client, load_to_db=True, progress_callback=progress_callback)
+                        _agent_log(
+                            hypothesis_id="C",
+                            message="pipeline worker finished analyze_library",
+                            data={
+                                "records_loaded": int(res.records_loaded),
+                                "raw_empty": bool(res.raw_preview.empty),
+                                "has_cluster_result": res.cluster_result is not None,
+                                "has_warning": bool(res.audio_features_warning),
+                            },
+                            run_id="pre",
+                        )
+                        q.put(("data", res))
+                    except spotipy.SpotifyException as exc:
+                        _agent_log(
+                            hypothesis_id="C",
+                            message="pipeline worker SpotifyException",
+                            data={"http_status": getattr(exc, "http_status", None)},
+                            run_id="pre",
+                        )
+                        q.put(("error", f"Spotify API request failed ({getattr(exc, 'http_status', 'unknown')})."))
+                    except Exception as exc:
+                        # Use repr to avoid potential __str__ issues in background threads
+                        _agent_log(hypothesis_id="C", message="pipeline worker Exception", data={"exc": repr(exc)}, run_id="pre")
+                        q.put(("error", f"Unexpected pipeline error: {repr(exc)}"))
+            finally:
+                # Signal that the worker is finished (success or failure)
+                q.put(None)
 
-    return _dashboard_html(
-        profile,
-        info=info_message,
-        warning=analysis.audio_features_warning,
-        loaded_rows=analysis.records_loaded,
-        dataset_name=analysis.dataset_name,
-        raw_preview=analysis.raw_preview,
-        scaled_preview=analysis.scaled_preview,
-        cluster_result=analysis.cluster_result,
-    )
+        # Start the worker thread
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        analysis = None
+        error_msg = None
+
+        # Yield progress updates as they arrive from the queue
+        while True:
+            try:
+                # Use a timeout so we can periodically check if the worker is still alive
+                item = q.get(timeout=1.0)
+                if item is None:
+                    # Sentinel received, worker is done
+                    break
+                
+                if isinstance(item, tuple):
+                    if item[0] == "data":
+                        analysis = item[1]
+                    else:
+                        error_msg = item[1]
+                    # We break the loop after receiving the final data or error
+                    break
+                else:
+                    # Add padding and newline to force browser flush
+                    yield item + (" " * 1024) + "\n"
+            except queue.Empty:
+                if not thread.is_alive():
+                    # If the queue is empty and the thread is dead, something went wrong
+                    error_msg = "Pipeline execution failed (background thread exited unexpectedly)."
+                    break
+                continue
+
+        if error_msg:
+            safe_html = json.dumps(_dashboard_html(profile, error=error_msg)).replace("<", "\\u003c")
+            yield f"<script>document.open(); document.write({safe_html}); document.close();</script>"
+            return
+
+        if analysis.raw_preview.empty:
+            safe_html = json.dumps(_dashboard_html(profile, warning='No saved tracks were found.')).replace("<", "\\u003c")
+            yield f"<script>document.open(); document.write({safe_html}); document.close();</script>"
+            return
+
+        info_message = "Pipeline completed successfully."
+        if analysis.audio_features_warning:
+            info_message = "Pipeline completed with partial audio-feature coverage."
+
+        final_dashboard = _dashboard_html(
+            profile,
+            info=info_message,
+            warning=analysis.audio_features_warning,
+            loaded_rows=analysis.records_loaded,
+            dataset_name=analysis.dataset_name,
+            raw_preview=analysis.raw_preview,
+            scaled_preview=analysis.scaled_preview,
+            cluster_result=analysis.cluster_result,
+        )
+        
+        # Store the result in the global cache for the redirect
+        # We use a static key for this demo; in production use a session-specific ID
+        user_id = profile.get("id", "default_user")
+        ANALYSIS_CACHE[user_id] = analysis
+        
+        # Redirect the browser to the clean dashboard route
+        yield "<script>window.location.href = '/dashboard';</script>\n"
+        print(f"DEBUG: Redirecting user {user_id} to /dashboard")
+
+    return Response(stream_with_context(generate()), mimetype='text/html')
 
 
 @app.post("/generate-playlist")
@@ -917,11 +1266,111 @@ def generate_playlist() -> Any:
     )
 
 
+@app.get("/dashboard")
+def dashboard_view() -> Any:
+    settings = _settings_from_env()
+    client, profile = _get_authenticated_client(settings)
+    if not client or not profile:
+        return redirect(url_for("index"))
+    
+    user_id = profile.get("id", "default_user")
+    analysis = ANALYSIS_CACHE.get(user_id)
+    
+    if not analysis:
+        # If no analysis in cache, go back to index with a message
+        session["status_message"] = "No analysis found. Please run the pipeline first."
+        return redirect(url_for("index"))
+        
+    return _dashboard_html(
+        profile,
+        info="Analysis loaded from cache.",
+        warning=analysis.audio_features_warning,
+        loaded_rows=analysis.records_loaded,
+        dataset_name=analysis.dataset_name,
+        raw_preview=analysis.raw_preview,
+        scaled_preview=analysis.scaled_preview,
+        cluster_result=analysis.cluster_result,
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/test-dashboard")
+def test_dashboard():
+    import numpy as np
+    from genresense.recommendations import ClusterSummary, ClusterDiagnostics, GenreClusterResult
+    
+    # Mock profile
+    profile = {"id": "test_user", "display_name": "Test User (Mock)"}
+    
+    # 50 tracks
+    n = 50
+    data = {
+        "track_id": [f"track_{i}" for i in range(n)],
+        "track_name": [f"Mock Track {i}" for i in range(n)],
+        "artist_name": [f"Mock Artist {i%5}" for i in range(n)],
+        "valence": np.random.rand(n),
+        "energy": np.random.rand(n),
+        "tempo": np.random.uniform(60, 180, n),
+        "cluster_id": [i % 2 for i in range(n)],
+        "centroid_distance": np.random.rand(n),
+        "track_url": [f"https://open.spotify.com/track/mock_{i}" for i in range(n)]
+    }
+    df = pd.DataFrame(data)
+    df["cluster_label"] = df["cluster_id"].map({0: "Deep Emerald Beats", 1: "Lavender Chill"})
+    
+    summaries = [
+        ClusterSummary(
+            cluster_id=0,
+            label="Deep Emerald Beats",
+            track_count=25,
+            share=0.5,
+            representative_track="Mock Track 0",
+            avg_energy=0.7,
+            avg_tempo=120.0,
+            avg_valence=0.4
+        ),
+        ClusterSummary(
+            cluster_id=1,
+            label="Lavender Chill",
+            track_count=25,
+            share=0.5,
+            representative_track="Mock Track 1",
+            avg_energy=0.3,
+            avg_tempo=90.0,
+            avg_valence=0.6
+        )
+    ]
+    
+    diagnostics = ClusterDiagnostics(
+        selected_clusters=2,
+        silhouette_score=0.45,
+        inertia_by_cluster={2: 12.3},
+        silhouette_by_cluster={2: 0.45}
+    )
+    
+    cluster_result = GenreClusterResult(
+        clustered_frame=df,
+        summaries=summaries,
+        diagnostics=diagnostics,
+        scaled_feature_columns=["valence", "energy"]
+    )
+    
+    # Renders the dashboard using the mock data
+    return _dashboard_html(
+        profile,
+        info="Mock data loaded for UI testing.",
+        loaded_rows=n,
+        dataset_name="mock_dataset",
+        raw_preview=df,
+        scaled_preview=df,
+        cluster_result=cluster_result,
+    )
+
+
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=8501, debug=True)
+    app.run(host="127.0.0.1", port=8501, debug=True, use_reloader=False)
 

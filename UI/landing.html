@@ -99,31 +99,31 @@
             },
         }
     </script>
-<style>
+    <style>
         .material-symbols-outlined {
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
             vertical-align: middle;
             line-height: 1;
         }
         body {
-            background-color: #f8f9fa;
+            background-color: #064e3b; /* Deep Emerald Green */
         }
     </style>
 </head>
-<body class="antialiased text-on-surface selection:bg-primary-container selection:text-on-primary-container">
+<body class="antialiased text-emerald-50 selection:bg-emerald-500 selection:text-white bg-[#064e3b]">
 <!-- TopNavBar -->
-<header class="bg-white/80 dark:bg-slate-950/80 backdrop-blur-md sticky top-0 z-50 border-b border-slate-200 dark:border-slate-800 shadow-sm dark:shadow-none">
+<header class="bg-black/40 backdrop-blur-md sticky top-0 z-50 border-b border-white/10 shadow-sm">
 <div class="flex justify-between items-center h-16 px-6 md:px-12 max-w-[1200px] mx-auto font-['Inter'] antialiased tracking-tight">
-<div class="text-xl font-black tracking-tighter text-slate-900 dark:text-white">
+<div class="text-xl font-black tracking-tighter text-white">
                 GenreSense
             </div>
 <nav class="hidden md:flex items-center space-x-8">
 <a class="text-[#1DB954] font-semibold border-b-2 border-[#1DB954] pb-1 transition-all duration-200" href="#">Platform</a>
-<a class="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all duration-200" href="#">Features</a>
-<a class="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all duration-200" href="#">Methodology</a>
-<a class="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 transition-all duration-200" href="#">Pricing</a>
+<a class="text-emerald-100/60 hover:text-white transition-all duration-200" href="#">Features</a>
+<a class="text-emerald-100/60 hover:text-white transition-all duration-200" href="#">Methodology</a>
+<a class="text-emerald-100/60 hover:text-white transition-all duration-200" href="#">Pricing</a>
 </nav>
-<button class="bg-primary-container text-on-primary-container px-5 py-2.5 rounded-full font-semibold text-sm active:scale-[0.98] transition-transform hover:opacity-90 flex items-center gap-2" onclick="console.log('Connecting to Spotify...')">
+<button class="bg-[#1DB954] text-black px-5 py-2.5 rounded-full font-semibold text-sm active:scale-[0.98] transition-transform hover:opacity-90 flex items-center gap-2" onclick="console.log('Connecting to Spotify...')">
 <span class="material-symbols-outlined text-[18px]" data-icon="brand_awareness">brand_awareness</span>
                 Connect to Spotify
             </button>
@@ -136,96 +136,91 @@
 <!-- Decorative background elements -->
 <div class="absolute -top-24 -left-24 w-96 h-96 bg-primary-container/5 rounded-full blur-3xl pointer-events-none"></div>
 <div class="absolute -bottom-24 -right-24 w-96 h-96 bg-secondary-container/10 rounded-full blur-3xl pointer-events-none"></div>
-<h1 class="font-h1 text-[48px] md:text-[64px] leading-tight text-slate-900 mb-6 tracking-tight max-w-4xl">
+<h1 class="font-h1 text-[48px] md:text-[64px] leading-tight text-white mb-6 tracking-tight max-w-4xl">
                     Analyze your Musical Identity.
                 </h1>
-<p class="font-body-lg text-lg md:text-xl text-slate-500 max-w-2xl mb-10">
+<p class="font-body-lg text-lg md:text-xl text-emerald-100/70 max-w-2xl mb-10">
                     We use machine learning to audit your listening habits, identify latent genre clusters, and build high-precision recommendations.
                 </p>
 <div class="flex flex-col items-center gap-4">
-<button class="bg-[#1DB954] text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center gap-3 shadow-lg shadow-[#1DB954]/20 hover:translate-y-[-1px] transition-all active:scale-[0.98]" onclick="console.log('Connecting to Spotify...')">
+<button class="bg-[#1DB954] text-black px-8 py-4 rounded-full font-semibold text-lg flex items-center gap-3 shadow-lg shadow-[#1DB954]/40 hover:translate-y-[-1px] transition-all active:scale-[0.98]" onclick="console.log('Connecting to Spotify...')">
 <span class="material-symbols-outlined" data-icon="music_note" style="font-variation-settings: 'FILL' 1;">music_note</span>
                         Connect to Spotify
                     </button>
-<p class="text-xs text-slate-400 max-w-xs font-label-sm">
+<p class="text-xs text-emerald-200/50 max-w-xs font-label-sm">
                         Security Note: We only access your listening history to generate your profile. No data is shared with third parties.
                     </p>
-</div>
-<!-- Product Preview Visual -->
-<div class="mt-16 w-full max-w-4xl rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden aspect-video relative group">
-<img alt="GenreSense Dashboard Visualization" class="w-full h-full object-cover" data-alt="abstract high-tech music data visualization with glowing green waveforms and 3D geometric clusters on a dark background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAvoUVbElzpYAdVs1vGz23zTvo9CtDzu3BRxvcEtBztvE-NNyhjixj_cXU-7-3UALlTz9D2DsniuWt2x09PTlBOkTMj59VEVzpP6tIDiekK1x6BWmwzxlzSh7Ln9nTh_bN8rW0pDto4UxJ6PFMofUzUqTJlQEKmt-IiGz_1gFl0qOJnSbw4l_eepsJABaxTLtG0geE41LImzfQxQIrhS95kNSllZYpJJ2alymJ9_xrkM-338jQTHtNtqs2ZjURu5UV0tkmOzAcNu2Fv"/>
-<div class="absolute inset-0 bg-gradient-to-t from-slate-900/40 to-transparent"></div>
 </div>
 </div>
 </section>
 <!-- Features Grid -->
-<section class="bg-white py-xl px-6 border-y border-slate-200">
+<section class="bg-black py-xl px-6 border-y border-white/10">
 <div class="max-w-[1200px] mx-auto">
 <div class="grid grid-cols-1 md:grid-cols-3 gap-gutter">
 <!-- Card 1 -->
-<div class="p-lg border border-slate-100 rounded-xl hover:border-primary-container/30 transition-all duration-300 group">
-<div class="w-12 h-12 bg-slate-50 rounded-lg flex items-center justify-center mb-md group-hover:bg-primary-container/10 transition-colors">
-<span class="material-symbols-outlined text-slate-600 group-hover:text-primary transition-colors" data-icon="analytics">analytics</span>
+<div class="p-lg bg-slate-950 border border-white/5 rounded-xl hover:border-[#1DB954]/30 transition-all duration-300 group">
+<div class="w-12 h-12 bg-emerald-950/30 rounded-lg flex items-center justify-center mb-md group-hover:bg-[#1DB954]/20 transition-colors">
+<span class="material-symbols-outlined text-[#1DB954]" data-icon="analytics">analytics</span>
 </div>
-<h3 class="font-h3 text-h3 text-slate-900 mb-sm">Acoustic Profiling</h3>
-<p class="font-body-md text-body-md text-slate-500">
-                            We analyze danceability, energy, and valence signatures.
+<h3 class="font-h3 text-h3 text-white mb-sm">Behavioral Auditing</h3>
+<p class="font-body-md text-body-md text-emerald-100/60">
+                            We utilize Collaborative Filtering to identify patterns in your listening history, mapping your preferences against a global network of user interactions.
                         </p>
 </div>
 <!-- Card 2 -->
-<div class="p-lg border border-slate-100 rounded-xl hover:border-primary-container/30 transition-all duration-300 group">
-<div class="w-12 h-12 bg-slate-50 rounded-lg flex items-center justify-center mb-md group-hover:bg-primary-container/10 transition-colors">
-<span class="material-symbols-outlined text-slate-600 group-hover:text-primary transition-colors" data-icon="hub">hub</span>
+<div class="p-lg bg-slate-950 border border-white/5 rounded-xl hover:border-[#1DB954]/30 transition-all duration-300 group">
+<div class="w-12 h-12 bg-emerald-950/30 rounded-lg flex items-center justify-center mb-md group-hover:bg-[#1DB954]/20 transition-colors">
+<span class="material-symbols-outlined text-[#1DB954]" data-icon="hub">hub</span>
 </div>
-<h3 class="font-h3 text-h3 text-slate-900 mb-sm">K-Means Clustering</h3>
-<p class="font-body-md text-body-md text-slate-500">
-                            Discover the mathematical genres hidden in your library.
+<h3 class="font-h3 text-h3 text-white mb-sm">Neighbor Analysis</h3>
+<p class="font-body-md text-body-md text-emerald-100/60">
+                            Our KNN engine calculates the mathematical distance between you and similar user profiles to find "nearest neighbors" with matching tastes.
                         </p>
 </div>
 <!-- Card 3 -->
-<div class="p-lg border border-slate-100 rounded-xl hover:border-primary-container/30 transition-all duration-300 group">
-<div class="w-12 h-12 bg-slate-50 rounded-lg flex items-center justify-center mb-md group-hover:bg-primary-container/10 transition-colors">
-<span class="material-symbols-outlined text-slate-600 group-hover:text-primary transition-colors" data-icon="playlist_add_check">playlist_add_check</span>
+<div class="p-lg bg-slate-950 border border-white/5 rounded-xl hover:border-[#1DB954]/30 transition-all duration-300 group">
+<div class="w-12 h-12 bg-emerald-950/30 rounded-lg flex items-center justify-center mb-md group-hover:bg-[#1DB954]/20 transition-colors">
+<span class="material-symbols-outlined text-[#1DB954]" data-icon="playlist_add_check">playlist_add_check</span>
 </div>
-<h3 class="font-h3 text-h3 text-slate-900 mb-sm">Dynamic Playlists</h3>
-<p class="font-body-md text-body-md text-slate-500">
-                            Export custom-tuned discovery or pure-genre sets.
+<h3 class="font-h3 text-h3 text-white mb-sm">Predictive Playlists</h3>
+<p class="font-body-md text-body-md text-emerald-100/60">
+                            Generate high-confidence discovery paths or genre-specific sets based on your unique behavioral signature.
                         </p>
 </div>
 </div>
 </div>
 </section>
 <!-- Technical Deep Dive (Bento Style) -->
-<section class="py-xl px-6 bg-slate-50">
+<section class="py-xl px-6 bg-emerald-950">
 <div class="max-w-[1200px] mx-auto">
 <div class="grid grid-cols-1 md:grid-cols-12 gap-gutter auto-rows-[200px]">
-<div class="md:col-span-8 md:row-span-2 bg-white border border-slate-200 rounded-xl p-lg flex flex-col justify-end relative overflow-hidden group">
+<div class="md:col-span-8 md:row-span-2 bg-black border border-white/5 rounded-xl p-lg flex flex-col justify-end relative overflow-hidden group">
 <div class="absolute top-0 right-0 p-lg opacity-10 group-hover:opacity-20 transition-opacity">
-<span class="material-symbols-outlined text-[120px]" data-icon="waves">waves</span>
+<span class="material-symbols-outlined text-[120px] text-[#1DB954]" data-icon="waves">waves</span>
 </div>
-<span class="inline-block px-2 py-1 bg-primary-container/10 text-primary font-label-sm rounded mb-sm w-fit uppercase">Precision Engine</span>
-<h2 class="font-h2 text-h2 text-slate-900 mb-md max-w-md">Our algorithm dissects over 40 metadata parameters per track.</h2>
-<p class="font-body-md text-slate-500 max-w-lg">Using high-fidelity spectral analysis and temporal metadata to map your unique sonic fingerprint across the global music landscape.</p>
+<span class="inline-block px-2 py-1 bg-[#1DB954]/10 text-[#1DB954] font-label-sm rounded mb-sm w-fit uppercase">Precision Engine</span>
+<h2 class="font-h2 text-h2 text-white mb-md max-w-md">Our engine processes millions of behavioral data points.</h2>
+<p class="font-body-md text-emerald-100/60 max-w-lg">Utilizing K-Nearest Neighbors and Collaborative Filtering, we map your unique sonic fingerprint against a global index to predict your next favorite track with 10x more accuracy than standard tags.</p>
 </div>
-<div class="md:col-span-4 md:row-span-1 bg-[#1DB954] rounded-xl p-lg flex flex-col justify-between text-white border border-white/10 shadow-sm hover:shadow-md transition-all">
-<span class="material-symbols-outlined" data-icon="verified" style="font-variation-settings: 'FILL' 1;">verified</span>
-<p class="font-h3 text-h3">Trustless Security Architecture</p>
+<div class="md:col-span-4 md:row-span-1 bg-[#1DB954] rounded-xl p-lg flex flex-col justify-between text-black border border-white/10 shadow-sm hover:shadow-md transition-all">
+<span class="material-symbols-outlined" data-icon="insights" style="font-variation-settings: 'FILL' 1;">insights</span>
+<p class="font-h3 text-h3">Unsupervised song recommendations</p>
 </div>
-<div class="md:col-span-4 md:row-span-1 bg-white border border-slate-200 rounded-xl p-lg flex flex-col justify-between hover:shadow-sm transition-all">
-<p class="font-label-sm text-slate-400 uppercase tracking-widest">Global Reach</p>
-<p class="font-h2 text-[32px] text-slate-900 font-bold">4.2M+</p>
-<p class="font-body-md text-slate-500">Tracks indexed hourly</p>
+<div class="md:col-span-4 md:row-span-1 bg-black border border-white/5 rounded-xl p-lg flex flex-col justify-between hover:shadow-sm transition-all">
+<p class="font-label-sm text-emerald-200/40 uppercase tracking-widest">Scalability</p>
+<p class="font-h2 text-[32px] text-white font-bold">Serverless</p>
+<p class="font-body-md text-emerald-100/60">Elastic compute architecture</p>
 </div>
 </div>
 </div>
 </section>
 </main>
 <!-- Footer -->
-<footer class="bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
-<div class="flex flex-col md:flex-row justify-between items-center py-12 px-6 md:px-12 max-w-[1200px] mx-auto gap-6 font-['Inter'] text-sm text-slate-500 dark:text-slate-400">
+<footer class="bg-black border-t border-white/10">
+<div class="flex flex-col md:flex-row justify-between items-center py-12 px-6 md:px-12 max-w-[1200px] mx-auto gap-6 font-['Inter'] text-sm text-emerald-100/50">
 <div class="flex flex-col items-center md:items-start gap-2">
-<div class="text-lg font-bold text-slate-900 dark:text-white">GenreSense</div>
-<div class="text-xs text-slate-500 dark:text-slate-400">© 2024 GenreSense. High-precision music intelligence.</div>
+<div class="text-lg font-bold text-white">GenreSense</div>
+<div class="text-xs text-emerald-100/40">© 2024 GenreSense. High-precision music intelligence.</div>
 </div>
 <div class="flex flex-wrap justify-center gap-x-8 gap-y-4">
 <a class="hover:text-[#1DB954] transition-colors cursor-pointer" href="#">Privacy Policy</a>
@@ -234,8 +229,8 @@
 <a class="hover:text-[#1DB954] transition-colors cursor-pointer" href="#">Contact Support</a>
 </div>
 <div class="flex gap-4">
-<span class="material-symbols-outlined text-slate-400 hover:text-[#1DB954] cursor-pointer transition-colors" data-icon="language">language</span>
-<span class="material-symbols-outlined text-slate-400 hover:text-[#1DB954] cursor-pointer transition-colors" data-icon="terminal">terminal</span>
+<span class="material-symbols-outlined text-emerald-100/30 hover:text-[#1DB954] cursor-pointer transition-colors" data-icon="language">language</span>
+<span class="material-symbols-outlined text-emerald-100/30 hover:text-[#1DB954] cursor-pointer transition-colors" data-icon="terminal">terminal</span>
 </div>
 </div>
 </footer>
