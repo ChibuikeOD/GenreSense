@@ -38,7 +38,8 @@ LANDING_TEMPLATE_PATH = ROOT / "UI" / "landing.html"
 TOKEN_INFO_KEY = "spotify_token_info"
 STATE_KEY = "spotify_oauth_state"
 PROFILE_KEY = "spotify_profile"
-SPOTIPY_CACHE_PATH = ROOT / ".spotify_cache"
+# Use /tmp for the cache path on Vercel as the root filesystem is read-only.
+SPOTIPY_CACHE_PATH = Path("/tmp") / ".spotify_cache"
 
 REQUIRED_ENV_VARS = [
     "SPOTIFY_CLIENT_ID",
