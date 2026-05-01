@@ -31,7 +31,8 @@ from genresense.pipeline import SpotifyLibraryPipeline
 from genresense.recommendations import GenreClusterResult, MathematicalGenreFinder, PlaylistBuilder, RecommendationError
 from genresense.spotify_client import SpotifyPlaylistPublisher, SpotifySavedTracksExtractor
 
-load_dotenv(ROOT / ".env", override=True)
+if not os.environ.get("VERCEL"):
+    load_dotenv(ROOT / ".env", override=False)
 
 
 LANDING_TEMPLATE_PATH = ROOT / "UI" / "landing.html"

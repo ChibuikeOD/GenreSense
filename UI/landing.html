@@ -113,20 +113,16 @@
 <body class="antialiased text-emerald-50 selection:bg-emerald-500 selection:text-white bg-[#064e3b]">
 <!-- TopNavBar -->
 <header class="bg-black/40 backdrop-blur-md sticky top-0 z-50 border-b border-white/10 shadow-sm">
-<div class="flex justify-between items-center h-16 px-6 md:px-12 max-w-[1200px] mx-auto font-['Inter'] antialiased tracking-tight">
-<div class="text-xl font-black tracking-tighter text-white">
+<div class="relative flex items-center h-16 px-6 md:px-12 max-w-[1200px] mx-auto font-['Inter'] antialiased tracking-tight">
+<div class="absolute left-1/2 -translate-x-1/2 text-3xl md:text-4xl font-black tracking-tighter text-white">
                 GenreSense
             </div>
-<nav class="hidden md:flex items-center space-x-8">
-<a class="text-[#1DB954] font-semibold border-b-2 border-[#1DB954] pb-1 transition-all duration-200" href="#">Platform</a>
-<a class="text-emerald-100/60 hover:text-white transition-all duration-200" href="#">Features</a>
-<a class="text-emerald-100/60 hover:text-white transition-all duration-200" href="#">Methodology</a>
-<a class="text-emerald-100/60 hover:text-white transition-all duration-200" href="#">Pricing</a>
-</nav>
+<div class="ml-auto">
 <button class="bg-[#1DB954] text-black px-5 py-2.5 rounded-full font-semibold text-sm active:scale-[0.98] transition-transform hover:opacity-90 flex items-center gap-2" onclick="console.log('Connecting to Spotify...')">
 <span class="material-symbols-outlined text-[18px]" data-icon="brand_awareness">brand_awareness</span>
                 Connect to Spotify
             </button>
+</div>
 </div>
 </header>
 <main>
