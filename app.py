@@ -114,20 +114,20 @@ class LibraryAnalysis:
 def _settings_from_env() -> AppSettings:
     mapping = {
         "spotify": {
-            "client_id": os.environ.get("SPOTIFY_CLIENT_ID"),
-            "client_secret": os.environ.get("SPOTIFY_CLIENT_SECRET"),
-            "redirect_uri": os.environ.get("SPOTIFY_REDIRECT_URI"),
-            "scope": os.environ.get("SPOTIFY_SCOPE", "user-library-read"),
+            "client_id": os.environ.get("SPOTIFY_CLIENT_ID", "").strip() or None,
+            "client_secret": os.environ.get("SPOTIFY_CLIENT_SECRET", "").strip() or None,
+            "redirect_uri": os.environ.get("SPOTIFY_REDIRECT_URI", "").strip() or None,
+            "scope": os.environ.get("SPOTIFY_SCOPE", "user-library-read").strip(),
         },
         "postgres": {
-            "dsn": os.environ.get("POSTGRES_DSN"),
-            "dataset_name": os.environ.get("POSTGRES_DATASET_NAME", "spotify_audit"),
+            "dsn": os.environ.get("POSTGRES_DSN", "").strip() or None,
+            "dataset_name": os.environ.get("POSTGRES_DATASET_NAME", "spotify_audit").strip(),
         },
         "rapidapi": {
-            "api_key": os.environ.get("RAPIDAPI_KEY"),
-            "api_host": os.environ.get("RAPIDAPI_HOST", "spotify-extended-audio-features-api.p.rapidapi.com"),
-            "base_url": os.environ.get("RAPIDAPI_BASE_URL", "https://spotify-extended-audio-features-api.p.rapidapi.com/v1"),
-            "timeout_seconds": os.environ.get("RAPIDAPI_TIMEOUT_SECONDS", "20"),
+            "api_key": os.environ.get("RAPIDAPI_KEY", "").strip() or None,
+            "api_host": os.environ.get("RAPIDAPI_HOST", "spotify-extended-audio-features-api.p.rapidapi.com").strip(),
+            "base_url": os.environ.get("RAPIDAPI_BASE_URL", "https://spotify-extended-audio-features-api.p.rapidapi.com/v1").strip(),
+            "timeout_seconds": os.environ.get("RAPIDAPI_TIMEOUT_SECONDS", "20").strip(),
         },
     }
     return AppSettings.from_mapping(mapping)
@@ -925,6 +925,8 @@ def login() -> Any:
             "has_session_state": STATE_KEY in session,
             "has_session_token": TOKEN_INFO_KEY in session,
             "scheme": request.scheme,
+            "host": request.headers.get("Host"),
+            "x_forwarded_proto": request.headers.get("X-Forwarded-Proto"),
         },
         run_id="pre",
     )
@@ -940,9 +942,9 @@ def login() -> Any:
         hypothesis_id="G",
         message="redirecting to spotify authorize",
         data={
-            "redirect_uri": settings.spotify.redirect_uri,
+            "configured_redirect_uri": settings.spotify.redirect_uri,
+            "constructed_authorize_url_prefix": authorize_url[:100],
             "scope": settings.spotify.scope,
-            "state_set": bool(session.get(STATE_KEY)),
         },
         run_id="pre",
     )
@@ -1288,6 +1290,18 @@ def dashboard_view() -> Any:
         scaled_preview=analysis.scaled_preview,
         cluster_result=analysis.cluster_result,
     )
+
+
+@app.get("/debug-config")
+def debug_config() -> Any:
+    settings = _settings_from_env()
+    return {
+        "configured_redirect_uri": settings.spotify.redirect_uri,
+        "request_host": request.headers.get("Host"),
+        "request_scheme": request.scheme,
+        "x_forwarded_proto": request.headers.get("X-Forwarded-Proto"),
+        "client_id_prefix": settings.spotify.client_id[:5] if settings.spotify.client_id else None,
+    }
 
 
 @app.get("/health")
