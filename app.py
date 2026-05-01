@@ -39,7 +39,13 @@ TOKEN_INFO_KEY = "spotify_token_info"
 STATE_KEY = "spotify_oauth_state"
 PROFILE_KEY = "spotify_profile"
 # Use /tmp for the cache path on Vercel as the root filesystem is read-only.
-SPOTIPY_CACHE_PATH = Path("/tmp") / ".spotify_cache"
+def _get_cache_path() -> str:
+    # Use a session-specific cache file to allow multiple users on the same instance.
+    session_id = session.get("session_id")
+    if not session_id:
+        session_id = secrets.token_hex(16)
+        session["session_id"] = session_id
+    return str(Path("/tmp") / f".spotify_cache_{session_id}")
 
 REQUIRED_ENV_VARS = [
     "SPOTIFY_CLIENT_ID",
@@ -95,7 +101,7 @@ _agent_log(
 
 def _oauth_cache_handler() -> CacheFileHandler:
     # Store OAuth tokens server-side to avoid cookie size limits.
-    return CacheFileHandler(cache_path=str(SPOTIPY_CACHE_PATH))
+    return CacheFileHandler(cache_path=_get_cache_path())
 
 # Store the latest analysis in memory to allow a clean redirect after the streaming pipeline finishes.
 # In a production app, this would be in Redis or a database.
@@ -133,11 +139,20 @@ def _settings_from_env() -> AppSettings:
     return AppSettings.from_mapping(mapping)
 
 
-def _build_oauth(settings: AppSettings) -> SpotifyOAuth:
-    state = session.get(STATE_KEY)
+def _build_oauth(settings: AppSettings, state: str | None = None) -> SpotifyOAuth:
     if not state:
-        state = secrets.token_urlsafe(16)
-        session[STATE_KEY] = state
+        try:
+            state = session.get(STATE_KEY)
+        except RuntimeError:
+            # Outside of request context (e.g. background thread)
+            state = None
+            
+    if not state:
+        try:
+            state = secrets.token_urlsafe(16)
+            session[STATE_KEY] = state
+        except RuntimeError:
+            pass
 
     return SpotifyOAuth(
         client_id=settings.spotify.client_id,
@@ -187,12 +202,21 @@ def _get_authenticated_client(settings: AppSettings) -> tuple[spotipy.Spotify | 
     # a stuck network call can't hang the Flask request forever.
     client = spotipy.Spotify(auth_manager=oauth, requests_timeout=20, retries=0)
 
-    # IMPORTANT: avoid calling /v1/me at page-load time (it can 429 and cause loops).
-    profile: dict[str, Any] = {"id": "spotify_user", "display_name": "Spotify user"}
+    # Fetch profile if not in session to avoid 429s while still having a real ID.
+    profile = session.get(PROFILE_KEY)
+    if not profile:
+        try:
+            profile = client.current_user()
+            session[PROFILE_KEY] = profile
+            _agent_log(hypothesis_id="E", message="fetched profile from spotify", data={"id": profile.get("id")}, run_id="pre")
+        except Exception as exc:
+            _agent_log(hypothesis_id="E", message="failed to fetch profile", data={"exc": str(exc)}, run_id="pre")
+            profile = {"id": "unknown", "display_name": "Spotify User"}
+
     _agent_log(
         hypothesis_id="E",
         message="_get_authenticated_client done",
-        data={"elapsed_ms_total": int((time.time() - _t0) * 1000)},
+        data={"elapsed_ms_total": int((time.time() - _t0) * 1000), "user_id": profile.get("id")},
         run_id="pre",
     )
     return client, profile
@@ -274,13 +298,13 @@ def _inject_login_into_landing(template: str, login_url: str, status_message: st
     return template + connect_script
 
 
-def _render_landing(status_message: str) -> str:
+def _render_landing(status_message: str, is_authenticated: bool = False) -> str:
     _agent_log(
         hypothesis_id="G",
         message="render landing",
         data={
             "status_message": (status_message or "")[:180],
-            "has_session_token": TOKEN_INFO_KEY in session,
+            "is_authenticated": is_authenticated,
             "has_session_state": STATE_KEY in session,
         },
         run_id="pre",
@@ -288,7 +312,17 @@ def _render_landing(status_message: str) -> str:
     if not LANDING_TEMPLATE_PATH.exists():
         return "<h1>Landing template missing</h1><p>Create UI/landing.html.</p>"
     template = LANDING_TEMPLATE_PATH.read_text(encoding="utf-8")
-    return _inject_login_into_landing(template, url_for("login"), status_message)
+    
+    login_url = url_for("login")
+    if is_authenticated:
+        # If authenticated, try to go straight to the analysis or start page
+        user_id = session.get(PROFILE_KEY, {}).get("id", "default_user")
+        if ANALYSIS_CACHE.get(user_id):
+            login_url = url_for("dashboard_view")
+        else:
+            login_url = url_for("start_process")
+            
+    return _inject_login_into_landing(template, login_url, status_message)
 
 
 def _config_error_page(error_message: str) -> str:
@@ -912,8 +946,17 @@ def index() -> Any:
     if "code" in request.args or "error" in request.args:
         return redirect(url_for("callback", **request.args.to_dict()))
 
+    # Check if we have a valid token in the cache
+    is_authenticated = False
+    try:
+        oauth = _build_oauth(settings)
+        token_info = oauth.validate_token(oauth.cache_handler.get_cached_token())
+        is_authenticated = bool(token_info)
+    except Exception:
+        pass
+
     status = session.pop("status_message", "Connect your Spotify account to start data ingestion and feature prep.")
-    return _render_landing(status)
+    return _render_landing(status, is_authenticated=is_authenticated)
 
 
 @app.get("/login")
@@ -935,8 +978,9 @@ def login() -> Any:
     except ConfigurationError as exc:
         return _config_error_page(str(exc))
 
-    session[STATE_KEY] = secrets.token_urlsafe(16)
-    oauth = _build_oauth(settings)
+    state = secrets.token_urlsafe(16)
+    session[STATE_KEY] = state
+    oauth = _build_oauth(settings, state=state)
     authorize_url = oauth.get_authorize_url()
     _agent_log(
         hypothesis_id="G",
@@ -1006,12 +1050,17 @@ def callback() -> Any:
 
     try:
         oauth.cache_handler.save_token_to_cache(token_info)
+        # Proactively fetch profile to lock in the user ID
+        client = spotipy.Spotify(auth=token_info["access_token"])
+        profile = client.current_user()
+        session[PROFILE_KEY] = profile
     except Exception as exc:  # noqa: BLE001
         session["status_message"] = f"Spotify token storage failed: {exc}"
-        _agent_log(hypothesis_id="G", message="token storage failed", data={"exc": str(exc)}, run_id="pre")
+        _agent_log(hypothesis_id="G", message="token storage or profile fetch failed", data={"exc": str(exc)}, run_id="pre")
         return redirect(url_for("index"))
+
     session["status_message"] = "Spotify connected successfully. Starting ingestion and feature prep."
-    _agent_log(hypothesis_id="G", message="callback stored token in session", data={}, run_id="pre")
+    _agent_log(hypothesis_id="G", message="callback stored token and profile", data={"user_id": profile.get("id")}, run_id="pre")
     return redirect(url_for("start_process"))
 
 
@@ -1041,13 +1090,19 @@ def start_process() -> Any:
 
 @app.get("/logout")
 def logout() -> Any:
+    # Clear the user-specific cache file if it exists.
     try:
-        if SPOTIPY_CACHE_PATH.exists():
-            SPOTIPY_CACHE_PATH.unlink()
-    except Exception:
-        pass
-    session.pop(PROFILE_KEY, None)
-    session.pop(STATE_KEY, None)
+        cache_path = Path(_get_cache_path())
+        if cache_path.exists():
+            cache_path.unlink()
+    except Exception as exc:
+        _agent_log(hypothesis_id="G", message="logout cache unlink failed", data={"exc": str(exc)}, run_id="pre")
+
+    user_id = session.get(PROFILE_KEY, {}).get("id")
+    if user_id:
+        ANALYSIS_CACHE.pop(user_id, None)
+
+    session.clear()
     session["status_message"] = "Disconnected from Spotify."
     return redirect(url_for("index"))
 
@@ -1084,12 +1139,12 @@ def run_pipeline() -> Any:
             # Push script tags to the queue instead of yielding
             q.put(f"<script>updateProgress({percent * 100}, {json.dumps(message)});</script>\n")
 
-        def worker():
+        def worker(user_profile: dict[str, Any]):
             try:
                 with app.app_context():
-                    _agent_log(hypothesis_id="C", message="pipeline worker start", data={}, run_id="pre")
+                    _agent_log(hypothesis_id="C", message="pipeline worker start", data={"user_id": user_profile.get("id")}, run_id="pre")
                     try:
-                        # Run the heavy lifting in this background thread
+                        # Pass the profile directly to avoid session access in thread
                         res = _analyze_library(settings, client, load_to_db=True, progress_callback=progress_callback)
                         _agent_log(
                             hypothesis_id="C",
@@ -1120,7 +1175,7 @@ def run_pipeline() -> Any:
                 q.put(None)
 
         # Start the worker thread
-        thread = threading.Thread(target=worker, daemon=True)
+        thread = threading.Thread(target=worker, args=(profile,), daemon=True)
         thread.start()
 
         analysis = None
