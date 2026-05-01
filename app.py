@@ -912,12 +912,8 @@ def index() -> Any:
     if "code" in request.args or "error" in request.args:
         return redirect(url_for("callback", **request.args.to_dict()))
 
-    client, profile = _get_authenticated_client(settings)
-    if not client or not profile:
-        status = session.pop("status_message", "Connect your Spotify account to start data ingestion and feature prep.")
-        return _render_landing(status)
-
-    return _dashboard_html(profile)
+    status = session.pop("status_message", "Connect your Spotify account to start data ingestion and feature prep.")
+    return _render_landing(status)
 
 
 @app.get("/login")
@@ -1297,79 +1293,6 @@ def dashboard_view() -> Any:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/test-dashboard")
-def test_dashboard():
-    import numpy as np
-    from genresense.recommendations import ClusterSummary, ClusterDiagnostics, GenreClusterResult
-    
-    # Mock profile
-    profile = {"id": "test_user", "display_name": "Test User (Mock)"}
-    
-    # 50 tracks
-    n = 50
-    data = {
-        "track_id": [f"track_{i}" for i in range(n)],
-        "track_name": [f"Mock Track {i}" for i in range(n)],
-        "artist_name": [f"Mock Artist {i%5}" for i in range(n)],
-        "valence": np.random.rand(n),
-        "energy": np.random.rand(n),
-        "tempo": np.random.uniform(60, 180, n),
-        "cluster_id": [i % 2 for i in range(n)],
-        "centroid_distance": np.random.rand(n),
-        "track_url": [f"https://open.spotify.com/track/mock_{i}" for i in range(n)]
-    }
-    df = pd.DataFrame(data)
-    df["cluster_label"] = df["cluster_id"].map({0: "Deep Emerald Beats", 1: "Lavender Chill"})
-    
-    summaries = [
-        ClusterSummary(
-            cluster_id=0,
-            label="Deep Emerald Beats",
-            track_count=25,
-            share=0.5,
-            representative_track="Mock Track 0",
-            avg_energy=0.7,
-            avg_tempo=120.0,
-            avg_valence=0.4
-        ),
-        ClusterSummary(
-            cluster_id=1,
-            label="Lavender Chill",
-            track_count=25,
-            share=0.5,
-            representative_track="Mock Track 1",
-            avg_energy=0.3,
-            avg_tempo=90.0,
-            avg_valence=0.6
-        )
-    ]
-    
-    diagnostics = ClusterDiagnostics(
-        selected_clusters=2,
-        silhouette_score=0.45,
-        inertia_by_cluster={2: 12.3},
-        silhouette_by_cluster={2: 0.45}
-    )
-    
-    cluster_result = GenreClusterResult(
-        clustered_frame=df,
-        summaries=summaries,
-        diagnostics=diagnostics,
-        scaled_feature_columns=["valence", "energy"]
-    )
-    
-    # Renders the dashboard using the mock data
-    return _dashboard_html(
-        profile,
-        info="Mock data loaded for UI testing.",
-        loaded_rows=n,
-        dataset_name="mock_dataset",
-        raw_preview=df,
-        scaled_preview=df,
-        cluster_result=cluster_result,
-    )
 
 
 if __name__ == "__main__":
