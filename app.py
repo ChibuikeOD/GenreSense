@@ -1266,17 +1266,25 @@ def dashboard_view() -> Any:
         return redirect(url_for("index"))
     
     user_id = profile.get("id", "default_user")
+    
+    # DISABLE CACHE LOADING: Force a re-run if not just finished
+    # analysis = persistence.load(user_id) if persistence else None
+    
+    # For now, we only allow viewing if it was JUST finished in this session
+    if not session.get("analysis_just_finished"):
+        session["status_message"] = "Please run the pipeline to view your dashboard."
+        return redirect(url_for("index"))
+    
     persistence = _get_persistence()
     analysis = persistence.load(user_id) if persistence else None
     
     if not analysis:
-        # If no analysis in cache, go back to index with a message
         session["status_message"] = "No analysis found. Please run the pipeline first."
         return redirect(url_for("index"))
         
     return _dashboard_html(
         profile,
-        info="Analysis loaded from cache.",
+        info="Analysis complete.",
         warning=analysis.audio_features_warning,
         loaded_rows=analysis.records_loaded,
         dataset_name=analysis.dataset_name,
