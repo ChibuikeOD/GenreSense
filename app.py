@@ -1171,6 +1171,8 @@ def run_pipeline() -> Any:
                 persistence.save(user_id, analysis)
                 _agent_log(hypothesis_id="C", message="pipeline results persisted", data={"user_id": user_id})
 
+            # For debug: we bypass load on external devices, but keep session flag
+            session["analysis_just_finished"] = True
             yield "<script>window.location.href = '/dashboard';</script>\n"
             
         except Exception as exc:
