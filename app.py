@@ -1158,7 +1158,7 @@ def run_pipeline() -> Any:
         try:
             # Execute analysis directly in the request thread
             # stream_with_context allows yielding progress to the browser
-            analysis = _analyze_library(settings, client, load_to_db=True, progress_callback=None)
+            analysis = _analyze_library(settings, client, load_to_db=True, progress_callback=progress_callback)
             
             # Since _analyze_library doesn't yield, we simulate progress milestones if needed
             # Or refactor _analyze_library to accept a yielding callback.
