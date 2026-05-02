@@ -178,28 +178,25 @@ class SpotifySavedTracksExtractor:
                 pass
             return None
 
-        # Execute batches in parallel (pool size 10)
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_idx = {executor.submit(fetch_batch, i, b): i for i, b in enumerate(batches)}
-            completed_count = 0
+        # Execute batches synchronously in serverless to avoid thread termination issues
+        completed_count = 0
+        for i, batch_ids in enumerate(batches):
+            if stop_all:
+                break
             
-            for future in as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                batch_data = future.result()
-                
-                if batch_data:
-                    for item in batch_data:
-                        if isinstance(item, dict) and item.get("id"):
-                            features[item["id"]] = item
-                else:
-                    # If we didn't get data and didn't hit a stop-level error, it's just a failed batch
-                    if not stop_all:
-                        failed_requests += len(batches[idx])
+            batch_data = fetch_batch(i, batch_ids)
+            if batch_data:
+                for item in batch_data:
+                    if isinstance(item, dict) and item.get("id"):
+                        features[item["id"]] = item
+            else:
+                if not stop_all:
+                    failed_requests += len(batch_ids)
 
-                completed_count += 1
-                if progress_callback and not stop_all:
-                    progress = 0.20 + (0.60 * (completed_count / total_batches))
-                    progress_callback(progress, f"Parallel analysis (Batch {completed_count}/{total_batches})...")
+            completed_count += 1
+            if progress_callback and not stop_all:
+                progress = 0.20 + (0.60 * (completed_count / total_batches))
+                progress_callback(progress, f"Analyzing audio features ({completed_count}/{total_batches})...")
 
         if auth_error:
             return features, auth_error

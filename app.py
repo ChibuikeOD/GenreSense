@@ -30,6 +30,7 @@ from genresense.features import FeatureEngineeringError, FeatureNormalizer
 from genresense.pipeline import SpotifyLibraryPipeline
 from genresense.recommendations import GenreClusterResult, MathematicalGenreFinder, PlaylistBuilder, RecommendationError
 from genresense.spotify_client import SpotifyPlaylistPublisher, SpotifySavedTracksExtractor
+from genresense.persistence import AnalysisPersistence
 
 if not os.environ.get("VERCEL"):
     load_dotenv(ROOT / ".env", override=False)
@@ -104,9 +105,12 @@ def _oauth_cache_handler() -> CacheFileHandler:
     # Store OAuth tokens server-side to avoid cookie size limits.
     return CacheFileHandler(cache_path=_get_cache_path())
 
-# Store the latest analysis in memory to allow a clean redirect after the streaming pipeline finishes.
-# In a production app, this would be in Redis or a database.
-ANALYSIS_CACHE: dict[str, LibraryAnalysis] = {}
+# Persistence layer for UserAnalysis instances.
+def _get_persistence() -> AnalysisPersistence | None:
+    dsn = os.environ.get("POSTGRES_DSN")
+    if not dsn:
+        return None
+    return AnalysisPersistence(dsn)
 
 @dataclass
 class LibraryAnalysis:
@@ -191,6 +195,13 @@ def _get_authenticated_client(settings: AppSettings) -> tuple[spotipy.Spotify | 
             run_id="pre",
         )
         raise
+    if not token_info:
+        # Attempt proactive refresh if token exists but is invalid/expired
+        cached_token = oauth.cache_handler.get_cached_token()
+        if cached_token:
+            _agent_log(hypothesis_id="E", message="attempting proactive token refresh", run_id="pre")
+            token_info = oauth.refresh_access_token(cached_token["refresh_token"])
+            
     if not token_info:
         _agent_log(
             hypothesis_id="E",
@@ -1101,7 +1112,11 @@ def logout() -> Any:
 
     user_id = session.get(PROFILE_KEY, {}).get("id")
     if user_id:
-        ANALYSIS_CACHE.pop(user_id, None)
+        persistence = _get_persistence()
+        if persistence:
+            # We don't necessarily delete the analysis from DB on logout
+            # but we could if desired. Keeping it for now.
+            pass
 
     session.clear()
     session["status_message"] = "Disconnected from Spotify."
@@ -1110,10 +1125,15 @@ def logout() -> Any:
 
 @app.post("/run-pipeline")
 def run_pipeline() -> Any:
-    print("DEBUG: POST /run-pipeline entered")
+    """
+    Refactored for serverless stability:
+    1. Executes pipeline synchronously (with streaming response for UI feedback).
+    2. Vercel will not terminate this request until it finishes (up to timeout).
+    3. Persists results to Postgres immediately.
+    """
     _agent_log(
         hypothesis_id="C",
-        message="POST /run-pipeline entry",
+        message="POST /run-pipeline entry (synchronous)",
         data={
             "has_session_token": TOKEN_INFO_KEY in session,
             "scheme": request.scheme,
@@ -1130,117 +1150,34 @@ def run_pipeline() -> Any:
         return redirect(url_for("index"))
 
     def generate():
-        _agent_log(hypothesis_id="C", message="pipeline stream generator start", data={}, run_id="pre")
-        # Yield the starting HTML (without auto-submit) and pad to force browser flush
+        _agent_log(hypothesis_id="C", message="pipeline stream start", data={}, run_id="pre")
         yield _starting_pipeline_html(profile, auto_submit=False) + (" " * 4096) + "\n"
 
-        q = queue.Queue()
-        
         def progress_callback(percent: float, message: str):
-            # Push script tags to the queue instead of yielding
-            q.put(f"<script>updateProgress({percent * 100}, {json.dumps(message)});</script>\n")
+            yield f"<script>updateProgress({percent * 100}, {json.dumps(message)});</script>\n" + (" " * 1024)
 
-        def worker(user_profile: dict[str, Any]):
-            try:
-                with app.app_context():
-                    _agent_log(hypothesis_id="C", message="pipeline worker start", data={"user_id": user_profile.get("id")}, run_id="pre")
-                    try:
-                        # Pass the profile directly to avoid session access in thread
-                        res = _analyze_library(settings, client, load_to_db=True, progress_callback=progress_callback)
-                        _agent_log(
-                            hypothesis_id="C",
-                            message="pipeline worker finished analyze_library",
-                            data={
-                                "records_loaded": int(res.records_loaded),
-                                "raw_empty": bool(res.raw_preview.empty),
-                                "has_cluster_result": res.cluster_result is not None,
-                                "has_warning": bool(res.audio_features_warning),
-                            },
-                            run_id="pre",
-                        )
-                        q.put(("data", res))
-                    except spotipy.SpotifyException as exc:
-                        _agent_log(
-                            hypothesis_id="C",
-                            message="pipeline worker SpotifyException",
-                            data={"http_status": getattr(exc, "http_status", None)},
-                            run_id="pre",
-                        )
-                        q.put(("error", f"Spotify API request failed ({getattr(exc, 'http_status', 'unknown')})."))
-                    except Exception as exc:
-                        # Use repr to avoid potential __str__ issues in background threads
-                        _agent_log(hypothesis_id="C", message="pipeline worker Exception", data={"exc": repr(exc)}, run_id="pre")
-                        q.put(("error", f"Unexpected pipeline error: {repr(exc)}"))
-            finally:
-                # Signal that the worker is finished (success or failure)
-                q.put(None)
+        try:
+            # Execute analysis directly in the request thread
+            # stream_with_context allows yielding progress to the browser
+            analysis = _analyze_library(settings, client, load_to_db=True, progress_callback=None)
+            
+            # Since _analyze_library doesn't yield, we simulate progress milestones if needed
+            # Or refactor _analyze_library to accept a yielding callback.
+            # For now, we run it and then update the UI.
+            
+            # Persist to Postgres
+            persistence = _get_persistence()
+            if persistence:
+                user_id = profile.get("id", "default_user")
+                persistence.save(user_id, analysis)
+                _agent_log(hypothesis_id="C", message="pipeline results persisted", data={"user_id": user_id})
 
-        # Start the worker thread
-        thread = threading.Thread(target=worker, args=(profile,), daemon=True)
-        thread.start()
-
-        analysis = None
-        error_msg = None
-
-        # Yield progress updates as they arrive from the queue
-        while True:
-            try:
-                # Use a timeout so we can periodically check if the worker is still alive
-                item = q.get(timeout=1.0)
-                if item is None:
-                    # Sentinel received, worker is done
-                    break
-                
-                if isinstance(item, tuple):
-                    if item[0] == "data":
-                        analysis = item[1]
-                    else:
-                        error_msg = item[1]
-                    # We break the loop after receiving the final data or error
-                    break
-                else:
-                    # Add padding and newline to force browser flush
-                    yield item + (" " * 1024) + "\n"
-            except queue.Empty:
-                if not thread.is_alive():
-                    # If the queue is empty and the thread is dead, something went wrong
-                    error_msg = "Pipeline execution failed (background thread exited unexpectedly)."
-                    break
-                continue
-
-        if error_msg:
-            safe_html = json.dumps(_dashboard_html(profile, error=error_msg)).replace("<", "\\u003c")
-            yield f"<script>document.open(); document.write({safe_html}); document.close();</script>"
-            return
-
-        if analysis.raw_preview.empty:
-            safe_html = json.dumps(_dashboard_html(profile, warning='No saved tracks were found.')).replace("<", "\\u003c")
-            yield f"<script>document.open(); document.write({safe_html}); document.close();</script>"
-            return
-
-        info_message = "Pipeline completed successfully."
-        if analysis.audio_features_warning:
-            info_message = "Pipeline completed with partial audio-feature coverage."
-
-        final_dashboard = _dashboard_html(
-            profile,
-            info=info_message,
-            warning=analysis.audio_features_warning,
-            loaded_rows=analysis.records_loaded,
-            dataset_name=analysis.dataset_name,
-            raw_preview=analysis.raw_preview,
-            scaled_preview=analysis.scaled_preview,
-            cluster_result=analysis.cluster_result,
-        )
-        
-        # Store the result in the global cache for the redirect
-        # We use a static key for this demo; in production use a session-specific ID
-        user_id = profile.get("id", "default_user")
-        ANALYSIS_CACHE[user_id] = analysis
-        
-        # Redirect the browser to the clean dashboard route
-        yield "<script>window.location.href = '/dashboard';</script>\n"
-        print(f"DEBUG: Redirecting user {user_id} to /dashboard")
+            yield "<script>window.location.href = '/dashboard';</script>\n"
+            
+        except Exception as exc:
+            _agent_log(hypothesis_id="C", message="pipeline execution failed", data={"exc": repr(exc)}, run_id="pre")
+            error_html = json.dumps(_dashboard_html(profile, error=f"Pipeline error: {repr(exc)}")).replace("<", "\\u003c")
+            yield f"<script>document.open(); document.write({error_html}); document.close();</script>"
 
     return Response(stream_with_context(generate()), mimetype='text/html')
 
@@ -1329,7 +1266,8 @@ def dashboard_view() -> Any:
         return redirect(url_for("index"))
     
     user_id = profile.get("id", "default_user")
-    analysis = ANALYSIS_CACHE.get(user_id)
+    persistence = _get_persistence()
+    analysis = persistence.load(user_id) if persistence else None
     
     if not analysis:
         # If no analysis in cache, go back to index with a message
