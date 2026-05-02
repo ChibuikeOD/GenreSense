@@ -764,7 +764,6 @@ def _dashboard_html(
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>GenreSense Dashboard</title>
-      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
       <style>
         body {{ font-family: Inter, Arial, sans-serif; margin: 0; background: #064e3b; color: #fff; }}
         .wrap {{ max-width: 1100px; margin: 0 auto; padding: 26px 18px 42px; }}
@@ -1176,8 +1175,8 @@ def run_pipeline() -> Any:
             
         except Exception as exc:
             _agent_log(hypothesis_id="C", message="pipeline execution failed", data={"exc": repr(exc)}, run_id="pre")
-            error_html = json.dumps(_dashboard_html(profile, error=f"Pipeline error: {repr(exc)}")).replace("<", "\\u003c")
-            yield f"<script>document.open(); document.write({error_html}); document.close();</script>"
+            session["status_message"] = f"Pipeline error: {repr(exc)}"
+            yield "<script>window.location.href = '/';</script>"
 
     return Response(stream_with_context(generate()), mimetype='text/html')
 
