@@ -646,7 +646,7 @@ def _dashboard_html(
             <div>
                 <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:20px; display:flex; align-items:center; gap:8px;">
                     <span class="material-symbols-outlined text-[#1db954]">hub</span>
-                    Nearest Neighbors (KNN)
+                    Recommended Playlist
                 </h3>
                 <div style="display:grid; gap:12px;">
                     """ + "".join([f'''
@@ -659,7 +659,7 @@ def _dashboard_html(
                             <div style="color:#94a3b8; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['artists'][0]['name']}</div>
                         </div>
                     </a>
-                    ''' for r in recommendations[:10]]) + """
+                    ''' for r in recommendations[:15]]) + """
                 </div>
             </div>
             <div>
@@ -1113,7 +1113,7 @@ def analyze_vibe() -> Any:
         session["status_message"] = "Could not find any of those tracks. Try being more specific!"
         return redirect(url_for("index"))
     
-    anchor, recommendations = engine.recommend(seeds)
+    anchor, recommendations = engine.recommend(seeds, limit=15)
     if not recommendations:
         session["status_message"] = "I could not find recommendation matches in the standing Spotify dataset. Try songs by artists represented in the catalog."
         return redirect(url_for("index"))
@@ -1142,9 +1142,12 @@ def analyze_vibe() -> Any:
         "artist_discovery": [minimize_track(ad) for ad in artist_discovery]
     }
     
-    session["vibe_data"] = vibe_data
-    session["analysis_just_finished"] = True
-    return redirect(url_for("dashboard_view"))
+    profile = {"display_name": "Music Explorer", "id": "anonymous"}
+    return _dashboard_html(
+        profile,
+        info="Your recommendation playlist is ready.",
+        vibe_data=vibe_data,
+    )
 
 
 @app.get("/search-tracks")
