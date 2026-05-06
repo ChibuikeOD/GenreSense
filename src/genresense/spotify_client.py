@@ -156,6 +156,14 @@ class SpotifySavedTracksExtractor:
                 if resp.status_code == 200:
                     return resp.json().get("audio_features", [])
                 
+                # Fallback to Spotify native audio features if RapidAPI fails
+                try:
+                    spotify_features = self.client.audio_features(batch_ids)
+                    if spotify_features and any(spotify_features):
+                        return [f for f in spotify_features if f]
+                except Exception:
+                    pass
+                
                 # Log non-200 responses for easier debugging
                 cls._agent_log(
                     hypothesis_id="R",

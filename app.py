@@ -18,7 +18,7 @@ import spotipy
 from dotenv import load_dotenv
 from flask import Flask, redirect, request, session, url_for, Response, stream_with_context
 from spotipy.cache_handler import CacheFileHandler
-from spotipy.oauth2 import SpotifyOAuth
+from spotipy.oauth2 import SpotifyOAuth, SpotifyClientCredentials
 
 ROOT = Path(__file__).resolve().parent
 SRC = ROOT / "src"
@@ -28,7 +28,7 @@ if str(SRC) not in sys.path:
 from genresense.config import AppSettings, ConfigurationError
 from genresense.features import FeatureEngineeringError, FeatureNormalizer
 from genresense.pipeline import SpotifyLibraryPipeline
-from genresense.recommendations import GenreClusterResult, MathematicalGenreFinder, PlaylistBuilder, RecommendationError
+from genresense.recommendations import GenreClusterResult, MathematicalGenreFinder, PlaylistBuilder, RecommendationError, SonicRecommendationEngine
 from genresense.spotify_client import SpotifyPlaylistPublisher, SpotifySavedTracksExtractor
 from genresense.persistence import AnalysisPersistence
 
@@ -171,6 +171,16 @@ def _build_oauth(settings: AppSettings, state: str | None = None) -> SpotifyOAut
     )
 
 
+def _get_client_credentials_client(settings: AppSettings) -> spotipy.Spotify:
+    cache_path = str(Path("/tmp") / ".spotify_client_credentials_cache")
+    auth_manager = SpotifyClientCredentials(
+        client_id=settings.spotify.client_id,
+        client_secret=settings.spotify.client_secret,
+        cache_handler=CacheFileHandler(cache_path=cache_path)
+    )
+    return spotipy.Spotify(auth_manager=auth_manager)
+
+
 def _get_authenticated_client(settings: AppSettings) -> tuple[spotipy.Spotify | None, dict[str, Any] | None]:
     _t0 = time.time()
     _agent_log(hypothesis_id="E", message="_get_authenticated_client start", data={}, run_id="pre")
@@ -234,107 +244,27 @@ def _get_authenticated_client(settings: AppSettings) -> tuple[spotipy.Spotify | 
     return client, profile
 
 
-def _inject_login_into_landing(template: str, login_url: str, status_message: str) -> str:
-    connect_anchor = (
-        f'<a href="{html.escape(login_url, quote=True)}" '
-        'class="bg-primary-container text-on-primary-container px-5 py-2.5 rounded-full font-semibold text-sm '
-        'active:scale-[0.98] transition-transform hover:opacity-90 flex items-center gap-2">'
-        '<span class="material-symbols-outlined text-[18px]">brand_awareness</span>Connect to Spotify</a>'
-    )
-    template = re.sub(
-        r"<button[^>]*>\s*<span[^>]*>brand_awareness</span>\s*Connect to Spotify\s*</button>",
-        connect_anchor,
-        template,
-        flags=re.IGNORECASE,
-    )
-
-    hero_anchor = (
-        f'<a href="{html.escape(login_url, quote=True)}" '
-        'class="bg-[#1DB954] text-white px-8 py-4 rounded-full font-semibold text-lg flex items-center gap-3 '
-        'shadow-lg shadow-[#1DB954]/20 hover:translate-y-[-1px] transition-all active:scale-[0.98]">'
-        '<span class="material-symbols-outlined" style="font-variation-settings: \'FILL\' 1;">music_note</span>'
-        "Connect to Spotify</a>"
-    )
-    template = re.sub(
-        r"<button[^>]*>\s*<span[^>]*>music_note</span>\s*Connect to Spotify\s*</button>",
-        hero_anchor,
-        template,
-        flags=re.IGNORECASE,
-    )
-
-    status_node = (
-        '<p id="auth-status" style="margin-top:14px;color:#64748b;font-size:13px;max-width:560px;line-height:1.45;">'
-        f"{html.escape(status_message)}</p>"
-    )
-
-    connect_script = f"""
-<script>
-(() => {{
-  const loginUrl = {json.dumps(login_url)};
-  const connectNodes = Array.from(document.querySelectorAll("button, a"))
-    .filter((node) => /connect\\s+to\\s+spotify/i.test((node.textContent || "").trim()));
-
-  connectNodes.forEach((node) => {{
-    if (node.tagName.toLowerCase() === "a") {{
-      node.setAttribute("href", loginUrl);
-      node.setAttribute("target", "_self");
-      return;
-    }}
-    node.setAttribute("type", "button");
-    node.onclick = (event) => {{
-      event.preventDefault();
-      window.location.assign(loginUrl);
-    }};
-    node.style.cursor = "pointer";
-  }});
-
-  // #region agent log
-  window.addEventListener("load", () => {{
-    try {{
-      const img = new Image();
-      img.src = "/__beacon?event=landing_load&ts=" + Date.now();
-    }} catch (e) {{}}
-  }});
-  // #endregion
-}})();
-</script>
-"""
-
-    if "</main>" in template:
-        template = template.replace("</main>", status_node + "\n</main>", 1)
-    else:
-        template = template + status_node
-
-    if "</body>" in template:
-        return template.replace("</body>", connect_script + "\n</body>", 1)
-    return template + connect_script
-
-
-def _render_landing(status_message: str, is_authenticated: bool = False) -> str:
-    _agent_log(
-        hypothesis_id="G",
-        message="render landing",
-        data={
-            "status_message": (status_message or "")[:180],
-            "is_authenticated": is_authenticated,
-            "has_session_state": STATE_KEY in session,
-        },
-        run_id="pre",
-    )
+def _render_landing(status_message: str) -> str:
     if not LANDING_TEMPLATE_PATH.exists():
         return "<h1>Landing template missing</h1><p>Create UI/landing.html.</p>"
     template = LANDING_TEMPLATE_PATH.read_text(encoding="utf-8")
     
-    login_url = url_for("login")
-    if is_authenticated:
-        # If authenticated, try to go straight to the analysis or start page
-        user_id = session.get(PROFILE_KEY, {}).get("id", "default_user")
-        if ANALYSIS_CACHE.get(user_id):
-            login_url = url_for("dashboard_view")
+    # Strip ad blocks if ads are disabled
+    enable_ads = os.environ.get("ENABLE_ADS", "false").lower() == "true"
+    if not enable_ads:
+        template = re.sub(r'<!-- AD_BLOCK_START -->.*?<!-- AD_BLOCK_END -->', '', template, flags=re.DOTALL)
+
+    if status_message:
+        status_node = (
+            '<p id="auth-status" style="text-align:center;margin-top:14px;color:#64748b;font-size:13px;line-height:1.45;">'
+            f"{html.escape(status_message)}</p>"
+        )
+        if "</main>" in template:
+            template = template.replace("</main>", status_node + "\n</main>", 1)
         else:
-            login_url = url_for("start_process")
+            template += status_node
             
-    return _inject_login_into_landing(template, login_url, status_message)
+    return template
 
 
 def _config_error_page(error_message: str) -> str:
@@ -520,6 +450,7 @@ def _dashboard_html(
     selected_playlist_mode: str = "pure",
     selected_playlist_size: int = 20,
     selected_visibility: str = "private",
+    vibe_data: dict[str, Any] | None = None,
 ) -> str:
     alerts: list[str] = []
     if info:
@@ -557,7 +488,202 @@ def _dashboard_html(
     metric_html = ""
 
     viz_html = ""
-    if cluster_result is not None and not cluster_result.clustered_frame.empty:
+    if vibe_data:
+        import json
+        seeds = vibe_data.get("seeds", [])
+        anchor = vibe_data.get("anchor", {})
+        recommendations = vibe_data.get("recommendations", [])
+        
+        viz_json = json.dumps({
+            "seeds": seeds,
+            "anchor": anchor,
+            "recommendations": recommendations
+        })
+        
+        viz_html = """
+        <div class="card" style="background:rgba(0,0,0,0.3); border-color:rgba(255,255,255,0.1); padding:20px; border-radius:12px; margin-top:20px; overflow:hidden;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <h2 style="margin:0; color:#f8fafc; font-size:20px; font-weight:800;">KNN Sonic Landscape</h2>
+                <div style="display:flex; gap:12px; font-size:11px; color:#94a3b8;">
+                    <div style="display:flex; align-items:center; gap:4px;"><div style="width:8px; height:8px; border-radius:50%; background:#fff;"></div> Seed</div>
+                    <div style="display:flex; align-items:center; gap:4px;"><div style="width:8px; height:8px; border-radius:50%; background:#1db954;"></div> Neighbor</div>
+                </div>
+            </div>
+            <div id="sonic-target-container" style="position:relative; width:100%; height:500px; background:radial-gradient(circle at center, #111827 0%, #000 100%); border-radius:8px; overflow:hidden; border: 1px solid rgba(255,255,255,0.05);">
+                <canvas id="sonic-target-canvas"></canvas>
+                <div style="position:absolute; bottom:10px; right:10px; color:#64748b; font-size:11px; pointer-events:none;">High Valence &rarr;</div>
+                <div style="position:absolute; top:10px; left:10px; color:#64748b; font-size:11px; pointer-events:none;">&uarr; High Energy</div>
+            </div>
+        </div>
+        
+        <script>
+        (function() {
+            const data = """ + viz_json + """;
+            const container = document.getElementById('sonic-target-container');
+            const canvas = document.getElementById('sonic-target-canvas');
+            const ctx = canvas.getContext('2d');
+            
+            let width, height;
+            function resize() {
+                width = container.offsetWidth;
+                height = container.offsetHeight;
+                canvas.width = width * window.devicePixelRatio;
+                canvas.height = height * window.devicePixelRatio;
+                canvas.style.width = width + 'px';
+                canvas.style.height = height + 'px';
+                ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            }
+            window.addEventListener('resize', resize);
+            resize();
+            
+            const nodes = [];
+            
+            // Map tracks to coordinates based on Energy and Valence
+            // Energy -> Y (inverted), Valence -> X
+            data.seeds.forEach((s) => {
+                const x = 50 + (s.audio_features.valence - data.anchor.valence) * 300;
+                const y = 50 - (s.audio_features.energy - data.anchor.energy) * 300;
+                nodes.push({
+                    type: 'seed',
+                    targetX: (s.audio_features.valence * 0.8 + 0.1) * width,
+                    targetY: (1 - (s.audio_features.energy * 0.8 + 0.1)) * height,
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    label: s.name,
+                    artist: s.artists[0].name,
+                    color: '#fff',
+                    size: 8,
+                    glow: 15
+                });
+            });
+            
+            data.recommendations.forEach((r) => {
+                nodes.push({
+                    type: 'neighbor',
+                    targetX: (r.audio_features.valence * 0.8 + 0.1) * width,
+                    targetY: (1 - (r.audio_features.energy * 0.8 + 0.1)) * height,
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    label: r.name,
+                    artist: r.artists[0].name,
+                    url: 'https://open.spotify.com/track/' + r.id,
+                    color: '#1db954',
+                    size: 5,
+                    glow: 10
+                });
+            });
+            
+            function draw() {
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.fillRect(0, 0, width, height);
+                
+                // Draw grid lines
+                ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+                ctx.lineWidth = 1;
+                for(let i=1; i<10; i++) {
+                    ctx.beginPath(); ctx.moveTo(i*width/10, 0); ctx.lineTo(i*width/10, height); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(0, i*height/10); ctx.lineTo(width, i*height/10); ctx.stroke();
+                }
+
+                // Smoothly animate nodes to their targets
+                nodes.forEach(n => {
+                    n.x += (n.targetX - n.x) * 0.05;
+                    n.y += (n.targetY - n.y) * 0.05;
+                    
+                    // Draw connections for seeds
+                    if (n.type === 'seed') {
+                        nodes.forEach(m => {
+                            if (m.type === 'neighbor') {
+                                const dist = Math.sqrt((n.x-m.x)**2 + (n.y-m.y)**2);
+                                if (dist < 150) {
+                                    ctx.beginPath();
+                                    ctx.strokeStyle = `rgba(29, 185, 84, ${0.2 * (1 - dist/150)})`;
+                                    ctx.moveTo(n.x, n.y);
+                                    ctx.lineTo(m.x, m.y);
+                                    ctx.stroke();
+                                }
+                            }
+                        });
+                    }
+
+                    ctx.shadowBlur = n.glow;
+                    ctx.shadowColor = n.color;
+                    ctx.fillStyle = n.color;
+                    ctx.beginPath();
+                    ctx.arc(n.x, n.y, n.size, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.shadowBlur = 0;
+                    if (n.type === 'seed') {
+                        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                        ctx.font = '600 11px Inter';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(n.label, n.x, n.y + n.size + 15);
+                    }
+                });
+                
+                requestAnimationFrame(draw);
+            }
+            draw();
+            
+            canvas.onclick = (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+                
+                nodes.forEach(n => {
+                    const dx = n.x - mx;
+                    const dy = n.y - my;
+                    if (Math.sqrt(dx*dx + dy*dy) < 15 && n.url) {
+                        window.open(n.url, '_blank');
+                    }
+                });
+            };
+        })();
+        </script>
+
+        <div style="margin-top:40px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+            <div>
+                <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:20px; display:flex; align-items:center; gap:8px;">
+                    <span class="material-symbols-outlined text-[#1db954]">hub</span>
+                    Nearest Neighbors (KNN)
+                </h3>
+                <div style="display:grid; gap:12px;">
+                    """ + "".join([f'''
+                    <a href="https://open.spotify.com/track/{r['id']}" target="_blank" 
+                       class="card" style="display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; text-decoration:none; transition:all 0.2s; overflow:hidden;">
+                        <img src="{r['album']['images'][0]['url'] if r.get('album', {}).get('images') else ''}" 
+                             style="width:40px; height:40px; border-radius:4px; object-fit:cover; background:#222;" alt="Album Art">
+                        <div style="flex:1; min-width:0;">
+                            <div style="color:#fff; font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['name']}</div>
+                            <div style="color:#94a3b8; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['artists'][0]['name']}</div>
+                        </div>
+                    </a>
+                    ''' for r in recommendations[:10]]) + """
+                </div>
+            </div>
+            <div>
+                <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:20px; display:flex; align-items:center; gap:8px;">
+                    <span class="material-symbols-outlined text-[#1db954]">person_search</span>
+                    Artist Discovery (3/Artist)
+                </h3>
+                <div style="display:grid; gap:12px;">
+                    """ + "".join([f'''
+                    <a href="https://open.spotify.com/track/{r['id']}" target="_blank" 
+                       class="card" style="display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; text-decoration:none; transition:all 0.2s; overflow:hidden;">
+                        <img src="{r['album']['images'][0]['url'] if r.get('album', {}).get('images') else ''}" 
+                             style="width:40px; height:40px; border-radius:4px; object-fit:cover; background:#222;" alt="Album Art">
+                        <div style="flex:1; min-width:0;">
+                            <div style="color:#fff; font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['name']}</div>
+                            <div style="color:#94a3b8; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['artists'][0]['name']}</div>
+                        </div>
+                    </a>
+                    ''' for r in vibe_data.get('artist_discovery', [])]) + """
+                </div>
+            </div>
+        </div>
+        """
+    elif cluster_result is not None and not cluster_result.clustered_frame.empty:
         import json
         viz_data = cluster_result.clustered_frame
         chart_data = viz_data[["track_name", "artist_name", "cluster_id", "valence", "energy"]].to_dict(orient="records")
@@ -757,6 +883,17 @@ def _dashboard_html(
             selected_visibility=selected_visibility,
         )
 
+    ad_slot_html = ""
+    if os.environ.get("ENABLE_ADS", "false").lower() == "true":
+        ad_slot_html = """
+        <!-- Dashboard Ad Slot -->
+        <div style="margin-top:40px; padding:20px; background:rgba(0,0,0,0.25); border:1px dashed rgba(255,255,255,0.1); border-radius:12px; text-align:center;">
+            <iframe data-aa='2436572' src='//acceptable.a-ads.com/2436572/?size=Adaptive'
+                    style='border:0; padding:0; width:100%; height:90px; overflow:hidden; display:block; margin:auto;'
+                    allowtransparency="true"></iframe>
+        </div>
+        """
+
     return f"""
     <!doctype html>
     <html lang="en">
@@ -834,6 +971,7 @@ def _dashboard_html(
         </div>
         {genre_html}
         {viz_html}
+        {ad_slot_html}
       </div>
     </body>
     </html>
@@ -936,190 +1074,105 @@ def beacon() -> Any:
 
 @app.get("/")
 def index() -> Any:
-    _agent_log(
-        hypothesis_id="A",
-        message="GET / entry",
-        data={
-            "args_keys": sorted(list(request.args.keys())),
-            "has_code": "code" in request.args,
-            "has_error": "error" in request.args,
-            "has_session_token": TOKEN_INFO_KEY in session,
-            "has_session_state": STATE_KEY in session,
-            "request_is_secure": bool(getattr(request, "is_secure", False)),
-            "scheme": request.scheme,
-        },
-    )
     try:
         settings = _settings_from_env()
     except ConfigurationError as exc:
         return _config_error_page(str(exc))
 
-    if "code" in request.args or "error" in request.args:
-        return redirect(url_for("callback", **request.args.to_dict()))
-
-    # Check if we have a valid token in the cache
-    is_authenticated = False
-    try:
-        oauth = _build_oauth(settings)
-        token_info = oauth.validate_token(oauth.cache_handler.get_cached_token())
-        is_authenticated = bool(token_info)
-    except Exception:
-        pass
-
-    status = session.pop("status_message", "Connect your Spotify account to start data ingestion and feature prep.")
-    return _render_landing(status, is_authenticated=is_authenticated)
+    status = session.pop("status_message", "Enter 5 songs to find your musical DNA.")
+    return _render_landing(status)
 
 
-@app.get("/login")
-def login() -> Any:
-    _agent_log(
-        hypothesis_id="G",
-        message="GET /login entry",
-        data={
-            "has_session_state": STATE_KEY in session,
-            "has_session_token": TOKEN_INFO_KEY in session,
-            "scheme": request.scheme,
-            "host": request.headers.get("Host"),
-            "x_forwarded_proto": request.headers.get("X-Forwarded-Proto"),
-        },
-        run_id="pre",
-    )
+@app.get("/ads.txt")
+def ads_txt() -> Any:
+    ads_file = ROOT / "ads.txt"
+    if os.environ.get("ENABLE_ADS", "false").lower() == "true" and ads_file.exists():
+        return Response(ads_file.read_text(), mimetype="text/plain")
+    return "Not Found", 404
+
+
+@app.get("/health")
+
+
+@app.post("/analyze-vibe")
+def analyze_vibe() -> Any:
     try:
         settings = _settings_from_env()
     except ConfigurationError as exc:
         return _config_error_page(str(exc))
 
-    state = secrets.token_urlsafe(16)
-    session[STATE_KEY] = state
-    oauth = _build_oauth(settings, state=state)
-    authorize_url = oauth.get_authorize_url()
-    _agent_log(
-        hypothesis_id="G",
-        message="redirecting to spotify authorize",
-        data={
-            "configured_redirect_uri": settings.spotify.redirect_uri,
-            "constructed_authorize_url_prefix": authorize_url[:100],
-            "scope": settings.spotify.scope,
-        },
-        run_id="pre",
-    )
-    return redirect(authorize_url)
+    track_queries = [
+        request.form.get("track_1", ""),
+        request.form.get("track_2", ""),
+        request.form.get("track_3", ""),
+        request.form.get("track_4", ""),
+        request.form.get("track_5", ""),
+    ]
+    
+    client = _get_client_credentials_client(settings)
+    engine = SonicRecommendationEngine(client, settings.rapidapi)
+    
+    seeds = engine.resolve_seeds(track_queries)
+    if not seeds:
+        session["status_message"] = "Could not find any of those tracks. Try being more specific!"
+        return redirect(url_for("index"))
+    
+    anchor, recommendations = engine.recommend(seeds)
+    artist_discovery = engine.get_artist_discovery_playlist(seeds)
+    print(f"DEBUG: Found {len(seeds)} seeds, {len(recommendations)} recommendations, and {len(artist_discovery)} artist discovery tracks.")
+    
+    # Minimize data stored in session to avoid 4KB cookie limit
+    def minimize_track(t):
+        return {
+            "id": t["id"],
+            "name": t["name"],
+            "artists": [{"name": t["artists"][0]["name"]}],
+            "album": {"images": [{"url": t["album"]["images"][0]["url"]}]} if t.get("album", {}).get("images") else {},
+            "audio_features": {
+                "energy": t["audio_features"].get("energy"),
+                "valence": t["audio_features"].get("valence"),
+                "danceability": t["audio_features"].get("danceability")
+            } if "audio_features" in t else {}
+        }
+
+    vibe_data = {
+        "seeds": [minimize_track(s) for s in seeds],
+        "anchor": anchor,
+        "recommendations": [minimize_track(r) for r in recommendations],
+        "artist_discovery": [minimize_track(ad) for ad in artist_discovery]
+    }
+    
+    session["vibe_data"] = vibe_data
+    session["analysis_just_finished"] = True
+    return redirect(url_for("dashboard_view"))
 
 
-@app.get("/callback")
-def callback() -> Any:
-    _agent_log(
-        hypothesis_id="G",
-        message="GET /callback entry",
-        data={
-            "args_keys": sorted(list(request.args.keys())),
-            "has_code": bool(request.args.get("code")),
-            "has_error": bool(request.args.get("error")),
-            "remote_state_present": bool(request.args.get("state")),
-            "local_state_present": bool(session.get(STATE_KEY)),
-            "scheme": request.scheme,
-        },
-        run_id="pre",
-    )
+    return redirect(url_for("dashboard_view"))
+
+
+@app.get("/search-tracks")
+def search_tracks() -> Any:
+    query = request.args.get("q", "").strip()
+    if not query or len(query) < 2:
+        return {"tracks": []}
+    
     try:
         settings = _settings_from_env()
-    except ConfigurationError as exc:
-        return _config_error_page(str(exc))
-
-    error = request.args.get("error")
-    if error:
-        session["status_message"] = f"Spotify authorization failed: {error}"
-        _agent_log(hypothesis_id="G", message="callback error param", data={"error": error}, run_id="pre")
-        return redirect(url_for("index"))
-
-    remote_state = request.args.get("state")
-    local_state = session.get(STATE_KEY)
-    if local_state and remote_state and local_state != remote_state:
-        session["status_message"] = "Spotify authorization failed: state mismatch."
-        _agent_log(
-            hypothesis_id="G",
-            message="callback state mismatch",
-            data={"local_state_prefix": str(local_state)[:6], "remote_state_prefix": str(remote_state)[:6]},
-            run_id="pre",
-        )
-        return redirect(url_for("index"))
-
-    code = request.args.get("code")
-    if not code:
-        session["status_message"] = "Spotify authorization failed: callback code was missing."
-        _agent_log(hypothesis_id="G", message="callback missing code", data={}, run_id="pre")
-        return redirect(url_for("index"))
-
-    oauth = _build_oauth(settings)
-    try:
-        _t_tok = time.time()
-        token_info = oauth.get_access_token(code=code, check_cache=False)
-    except Exception as exc:  # noqa: BLE001
-        session["status_message"] = f"Spotify token exchange failed: {exc}"
-        _agent_log(hypothesis_id="G", message="token exchange failed", data={"exc": str(exc)}, run_id="pre")
-        return redirect(url_for("index"))
-
-    try:
-        oauth.cache_handler.save_token_to_cache(token_info)
-        # Proactively fetch profile to lock in the user ID
-        client = spotipy.Spotify(auth=token_info["access_token"])
-        profile = client.current_user()
-        session[PROFILE_KEY] = profile
-    except Exception as exc:  # noqa: BLE001
-        session["status_message"] = f"Spotify token storage failed: {exc}"
-        _agent_log(hypothesis_id="G", message="token storage or profile fetch failed", data={"exc": str(exc)}, run_id="pre")
-        return redirect(url_for("index"))
-
-    session["status_message"] = "Spotify connected successfully. Starting ingestion and feature prep."
-    _agent_log(hypothesis_id="G", message="callback stored token and profile", data={"user_id": profile.get("id")}, run_id="pre")
-    return redirect(url_for("start_process"))
-
-
-@app.get("/start")
-def start_process() -> Any:
-    _agent_log(
-        hypothesis_id="B",
-        message="GET /start entry",
-        data={
-            "has_session_token": TOKEN_INFO_KEY in session,
-            "has_session_state": STATE_KEY in session,
-            "scheme": request.scheme,
-        },
-    )
-    try:
-        settings = _settings_from_env()
-    except ConfigurationError as exc:
-        return _config_error_page(str(exc))
-
-    client, profile = _get_authenticated_client(settings)
-    if not client or not profile:
-        session["status_message"] = "Connect your Spotify account to start the process."
-        return redirect(url_for("index"))
-
-    return _starting_pipeline_html(profile, auto_submit=True)
+        client = _get_client_credentials_client(settings)
+        results = client.search(q=query, type="track", limit=5)
+        tracks = []
+        for t in results.get("tracks", {}).get("items", []):
+            tracks.append({
+                "name": t["name"],
+                "artist": t["artists"][0]["name"],
+                "display": f"{t['name']} - {t['artists'][0]['name']}"
+            })
+        return {"tracks": tracks}
+    except Exception as exc:
+        return {"tracks": [], "error": str(exc)}
 
 
 @app.get("/logout")
-def logout() -> Any:
-    # Clear the user-specific cache file if it exists.
-    try:
-        cache_path = Path(_get_cache_path())
-        if cache_path.exists():
-            cache_path.unlink()
-    except Exception as exc:
-        _agent_log(hypothesis_id="G", message="logout cache unlink failed", data={"exc": str(exc)}, run_id="pre")
-
-    user_id = session.get(PROFILE_KEY, {}).get("id")
-    if user_id:
-        persistence = _get_persistence()
-        if persistence:
-            # We don't necessarily delete the analysis from DB on logout
-            # but we could if desired. Keeping it for now.
-            pass
-
-    session.clear()
-    session["status_message"] = "Disconnected from Spotify."
-    return redirect(url_for("index"))
 
 
 @app.post("/run-pipeline")
@@ -1262,37 +1315,21 @@ def generate_playlist() -> Any:
 @app.get("/dashboard")
 def dashboard_view() -> Any:
     settings = _settings_from_env()
+    
+    # If we have vibe_data in session, use it
+    vibe_data = session.get("vibe_data")
+    if vibe_data:
+        # Create a dummy profile for the dashboard
+        profile = {"display_name": "Music Explorer", "id": "anonymous"}
+        return _dashboard_html(
+            profile,
+            info="Your Sonic Target is ready.",
+            vibe_data=vibe_data
+        )
+
     client, profile = _get_authenticated_client(settings)
     if not client or not profile:
         return redirect(url_for("index"))
-    
-    user_id = profile.get("id", "default_user")
-    
-    # DISABLE CACHE LOADING: Force a re-run if not just finished
-    # analysis = persistence.load(user_id) if persistence else None
-    
-    # For now, we only allow viewing if it was JUST finished in this session
-    if not session.get("analysis_just_finished"):
-        session["status_message"] = "Please run the pipeline to view your dashboard."
-        return redirect(url_for("index"))
-    
-    persistence = _get_persistence()
-    analysis = persistence.load(user_id) if persistence else None
-    
-    if not analysis:
-        session["status_message"] = "No analysis found. Please run the pipeline first."
-        return redirect(url_for("index"))
-        
-    return _dashboard_html(
-        profile,
-        info="Analysis complete.",
-        warning=analysis.audio_features_warning,
-        loaded_rows=analysis.records_loaded,
-        dataset_name=analysis.dataset_name,
-        raw_preview=analysis.raw_preview,
-        scaled_preview=analysis.scaled_preview,
-        cluster_result=analysis.cluster_result,
-    )
 
 
 @app.get("/debug-config")
@@ -1304,7 +1341,10 @@ def debug_config() -> Any:
         "request_scheme": request.scheme,
         "x_forwarded_proto": request.headers.get("X-Forwarded-Proto"),
         "client_id_prefix": settings.spotify.client_id[:5] if settings.spotify.client_id else None,
+        "enable_ads": os.environ.get("ENABLE_ADS"),
+        "enable_ads_bool": os.environ.get("ENABLE_ADS", "false").lower() == "true",
     }
+
 
 
 @app.get("/health")

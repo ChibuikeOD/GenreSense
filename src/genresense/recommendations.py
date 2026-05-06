@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -487,3 +488,192 @@ class DiscoveryPlaylistBuilder:
             
         playlist_name = f"GenreSense Discovery: {target_summary.label}"
         return playlist_name, generated_tracks, seed_track_name
+
+
+class SonicRecommendationEngine:
+    def __init__(self, client: spotipy.Spotify, rapidapi: RapidApiSettings):
+        self.client = client
+        self.rapidapi = rapidapi
+
+    def resolve_seeds(self, track_queries: list[str]) -> list[dict[str, Any]]:
+        """Resolve track names to Spotify track objects with audio features."""
+        seeds = []
+        for q in track_queries:
+            if not q.strip():
+                continue
+            try:
+                results = self.client.search(q=q, type="track", limit=1)
+                tracks = results.get("tracks", {}).get("items", [])
+                if tracks:
+                    seeds.append(tracks[0])
+            except Exception:
+                continue
+        
+        if not seeds:
+            return []
+
+        # Fetch features for seeds
+        seed_ids = [t["id"] for t in seeds]
+        from genresense.spotify_client import SpotifySavedTracksExtractor
+        extractor = SpotifySavedTracksExtractor(self.client, self.rapidapi)
+        features_dict, _ = extractor._fetch_audio_features(seed_ids)
+        
+        resolved_seeds = []
+        for t in seeds:
+            f = features_dict.get(t["id"])
+            if f:
+                t["audio_features"] = f
+                resolved_seeds.append(t)
+        
+        return resolved_seeds
+
+    def calculate_anchor(self, seeds: list[dict[str, Any]]) -> dict[str, float]:
+        """Calculate the average Energy, Valence, and Danceability of the seeds."""
+        energies = [t["audio_features"]["energy"] for t in seeds if "audio_features" in t]
+        valences = [t["audio_features"]["valence"] for t in seeds if "audio_features" in t]
+        danceabilities = [t["audio_features"]["danceability"] for t in seeds if "audio_features" in t]
+        
+        return {
+            "energy": sum(energies) / len(energies) if energies else 0.5,
+            "valence": sum(valences) / len(valences) if valences else 0.5,
+            "danceability": sum(danceabilities) / len(danceabilities) if danceabilities else 0.5,
+        }
+
+    def expand_pool(self, seeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Search for ~150 candidate tracks related to the seeds for a rich landscape."""
+        artist_ids = set()
+        for t in seeds:
+            for artist in t.get("artists", []):
+                if artist.get("id"):
+                    artist_ids.add(artist["id"])
+        
+        pool = []
+        seen_ids = {t["id"] for t in seeds}
+        
+        # 1. Artist Top Tracks & Related Artists
+        for artist_id in list(artist_ids)[:5]:
+            try:
+                # Top Tracks
+                results = self.client.artist_top_tracks(artist_id, country='US')
+                for t in results.get("tracks", []):
+                    if t["id"] not in seen_ids:
+                        pool.append(t)
+                        seen_ids.add(t["id"])
+                
+                # Related Artists
+                related = self.client.artist_related_artists(artist_id)
+                for ra in related.get("artists", [])[:3]:
+                    ra_top = self.client.artist_top_tracks(ra["id"], country='US')
+                    for t in ra_top.get("tracks", []):
+                        if t["id"] not in seen_ids:
+                            pool.append(t)
+                            seen_ids.add(t["id"])
+            except Exception:
+                continue
+        
+        # 2. Keyword Search based on seed genres/names if pool is still small
+        if len(pool) < 40:
+            for s in seeds[:3]:
+                try:
+                    search_results = self.client.search(q=f'track:"{s["name"]}"', type="track", limit=20)
+                    for t in search_results.get("tracks", {}).get("items", []):
+                        if t["id"] not in seen_ids:
+                            pool.append(t)
+                            seen_ids.add(t["id"])
+                except Exception:
+                    continue
+
+        # 3. Global Fallback if still empty (ensure visualization works)
+        if len(pool) < 10:
+            try:
+                # Search for current popular tracks as a general baseline
+                results = self.client.search(q="year:2024", type="track", limit=50)
+                for t in results.get("tracks", {}).get("items", []):
+                    if t["id"] not in seen_ids:
+                        pool.append(t)
+                        seen_ids.add(t["id"])
+            except Exception:
+                pass
+
+        return pool[:150]
+
+    def recommend(self, seeds: list[dict[str, Any]], limit: int = 20) -> tuple[dict[str, float], list[dict[str, Any]]]:
+        """Run the full KNN-based recommendation pipeline using a local catalog."""
+        anchor = self.calculate_anchor(seeds)
+        
+        # Load local catalog
+        catalog_path = Path("data/catalog/music_universe.csv")
+        if catalog_path.exists():
+            pool_df = pd.read_csv(catalog_path)
+        else:
+            # Fallback to expansion if catalog missing (unlikely in production)
+            pool = self.expand_pool(seeds)
+            pool_df = pd.DataFrame(pool)
+            if pool_df.empty:
+                return anchor, []
+        
+        # Calculate distances against the catalog
+        from genresense.schema import AUDIO_FEATURE_COLUMNS
+        
+        # Ensure we have the necessary columns
+        available_features = [col for col in AUDIO_FEATURE_COLUMNS if col in pool_df.columns]
+        if not available_features:
+            return anchor, []
+
+        # Vectorized Euclidean distance
+        # We'll use Energy, Valence, and Danceability for the KNN map
+        target_features = ["energy", "valence", "danceability"]
+        target_vec = np.array([anchor.get(f, 0.5) for f in target_features])
+        
+        catalog_matrix = pool_df[target_features].fillna(0.5).to_numpy()
+        distances = np.linalg.norm(catalog_matrix - target_vec, axis=1)
+        
+        pool_df["distance"] = distances
+        
+        # Select top matches
+        top_matches = pool_df.sort_values("distance").head(limit)
+        
+        # Format as Spotify-like track objects for the UI
+        recommendations = []
+        for _, row in top_matches.iterrows():
+            recommendations.append({
+                "id": str(row["track_id"]),
+                "name": str(row["track_name"]),
+                "artists": [{"name": str(row["artist_name"])}],
+                "album": {"images": [{"url": ""}]}, # Local catalog might lack art unless we store it
+                "audio_features": {f: row[f] for f in AUDIO_FEATURE_COLUMNS if f in row},
+                "distance": float(row["distance"])
+            })
+            
+        return anchor, recommendations
+
+    def get_artist_discovery_playlist(self, seeds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Find the artists of the seed songs and make a playlist consisting of 3 songs from each artist."""
+        artist_ids = {} # name -> id
+        for t in seeds:
+            for artist in t.get("artists", []):
+                if artist.get("id") and artist.get("name"):
+                    artist_ids[artist["name"]] = artist["id"]
+        
+        discovery_tracks = []
+        seen_ids = {t["id"] for t in seeds}
+        
+        for artist_name, artist_id in artist_ids.items():
+            try:
+                # Get artist's top tracks
+                results = self.client.artist_top_tracks(artist_id, country='US')
+                artist_tracks = results.get("tracks", [])
+                
+                # Take up to 3 tracks that we haven't seen yet
+                added_count = 0
+                for t in artist_tracks:
+                    if t["id"] not in seen_ids:
+                        discovery_tracks.append(t)
+                        seen_ids.add(t["id"])
+                        added_count += 1
+                        if added_count >= 3:
+                            break
+            except Exception:
+                continue
+                
+        return discovery_tracks

@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+
 <script id="tailwind-config">
         tailwind.config = {
             darkMode: "class",
@@ -100,13 +101,140 @@
         }
     </script>
     <style>
-        .material-symbols-outlined {
-            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-            vertical-align: middle;
-            line-height: 1;
-        }
         body {
-            background-color: #064e3b; /* Deep Emerald Green */
+            background-color: #064e3b;
+        }
+        .autocomplete-suggestions {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            width: 100%;
+            z-index: 1000;
+            margin-top: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+        }
+        .autocomplete-suggestion {
+            padding: 10px 16px;
+            cursor: pointer;
+            color: #fff;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .autocomplete-suggestion:hover {
+            background: rgba(29, 185, 84, 0.2);
+            color: #1DB954;
+        }
+        .input-wrapper {
+            position: relative;
+        }
+        /* ── Self-Hosted Ad Banners ── */
+        .promo-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 20px;
+            padding: 20px 28px;
+            border-radius: 14px;
+            border: 1px solid rgba(29, 185, 84, 0.15);
+            text-decoration: none;
+            color: #fff;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+            animation: promoFadeIn 0.5s ease;
+        }
+        .promo-banner::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            opacity: 0;
+            transition: opacity 0.35s;
+        }
+        .promo-banner:hover {
+            border-color: rgba(29, 185, 84, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(29, 185, 84, 0.12);
+        }
+        .promo-banner:hover::before { opacity: 1; }
+        .promo-banner .promo-body { position: relative; z-index: 1; flex: 1; min-width: 0; }
+        .promo-banner .promo-sponsored {
+            display: inline-block;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.35);
+            margin-bottom: 6px;
+        }
+        .promo-banner .promo-title {
+            font-size: 17px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: #fff;
+            margin-bottom: 3px;
+        }
+        .promo-banner .promo-desc {
+            font-size: 13px;
+            color: rgba(255,255,255,0.5);
+            line-height: 1.4;
+        }
+        .promo-banner .promo-cta {
+            position: relative;
+            z-index: 1;
+            background: #1DB954;
+            color: #000;
+            padding: 10px 22px;
+            border-radius: 8px;
+            font-weight: 700;
+            font-size: 13px;
+            white-space: nowrap;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .promo-banner:hover .promo-cta {
+            background: #1ed760;
+            transform: scale(1.04);
+        }
+        .promo-grad-1 { background: linear-gradient(135deg, #0a0a0a 0%, #062e23 100%); }
+        .promo-grad-1::before { background: linear-gradient(135deg, rgba(29,185,84,0.05) 0%, transparent 100%); }
+        .promo-grad-2 { background: linear-gradient(135deg, #0f172a 0%, #064e3b 100%); }
+        .promo-grad-2::before { background: linear-gradient(135deg, rgba(99,102,241,0.05) 0%, transparent 100%); }
+        .promo-grad-3 { background: linear-gradient(135deg, #18181b 0%, #1e1b4b 50%, #064e3b 100%); }
+        .promo-grad-3::before { background: linear-gradient(135deg, rgba(168,85,247,0.05) 0%, transparent 100%); }
+        @keyframes promoFadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        /* Carousel hide/show */
+        .promo-carousel .promo-banner { display: none; }
+        .promo-carousel .promo-banner.active { display: flex; }
+        /* ── A-Ads Slot ── */
+        .aads-slot {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 90px;
+            background: rgba(0,0,0,0.25);
+            border: 1px dashed rgba(255,255,255,0.08);
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+        .aads-slot iframe { border: 0; }
+        .aads-fallback {
+            text-align: center;
+            padding: 16px;
+            color: rgba(255,255,255,0.25);
+            font-size: 11px;
+            letter-spacing: 0.05em;
+        }
+        @media (max-width: 768px) {
+            .promo-banner { flex-direction: column; text-align: center; padding: 18px 20px; }
+            .promo-banner .promo-cta { width: 100%; text-align: center; }
         }
     </style>
 </head>
@@ -117,14 +245,39 @@
 <div class="absolute left-1/2 -translate-x-1/2 text-3xl md:text-4xl font-black tracking-tighter text-white">
                 GenreSense
             </div>
-<div class="ml-auto">
-<button class="bg-[#1DB954] text-black px-5 py-2.5 rounded-full font-semibold text-sm active:scale-[0.98] transition-transform hover:opacity-90 flex items-center gap-2" onclick="console.log('Connecting to Spotify...')">
-<span class="material-symbols-outlined text-[18px]" data-icon="brand_awareness">brand_awareness</span>
-                Connect to Spotify
-            </button>
 </div>
 </div>
 </header>
+<!-- AD_BLOCK_START -->
+<div class="max-w-[1200px] mx-auto mt-6 px-6">
+    <div class="promo-carousel" id="promo-top">
+        <a href="https://open.spotify.com" target="_blank" rel="noopener" class="promo-banner promo-grad-1 active">
+            <div class="promo-body">
+                <span class="promo-sponsored">Sponsored</span>
+                <div class="promo-title">Discover New Music on Spotify</div>
+                <div class="promo-desc">Millions of tracks. Zero ads with Premium. Start listening free.</div>
+            </div>
+            <span class="promo-cta">Open Spotify</span>
+        </a>
+        <a href="#" class="promo-banner promo-grad-2">
+            <div class="promo-body">
+                <span class="promo-sponsored">GenreSense Pro</span>
+                <div class="promo-title">Unlock Your Full Sonic Profile</div>
+                <div class="promo-desc">Deep analytics, playlist exports, and weekly taste reports. Coming soon.</div>
+            </div>
+            <span class="promo-cta">Join Waitlist</span>
+        </a>
+        <a href="https://developer.spotify.com" target="_blank" rel="noopener" class="promo-banner promo-grad-3">
+            <div class="promo-body">
+                <span class="promo-sponsored">For Developers</span>
+                <div class="promo-title">Build with the Spotify Web API</div>
+                <div class="promo-desc">Access audio features, user data, and playback controls for your apps.</div>
+            </div>
+            <span class="promo-cta">View Docs</span>
+        </a>
+    </div>
+</div>
+<!-- AD_BLOCK_END -->
 <main>
 <!-- Hero Section -->
 <section class="relative overflow-hidden pt-20 pb-32 px-6">
@@ -132,23 +285,59 @@
 <!-- Decorative background elements -->
 <div class="absolute -top-24 -left-24 w-96 h-96 bg-primary-container/5 rounded-full blur-3xl pointer-events-none"></div>
 <div class="absolute -bottom-24 -right-24 w-96 h-96 bg-secondary-container/10 rounded-full blur-3xl pointer-events-none"></div>
+
 <h1 class="font-h1 text-[48px] md:text-[64px] leading-tight text-white mb-6 tracking-tight max-w-4xl">
-                    Analyze your Musical Identity.
-                </h1>
+    Your Musical DNA, Found by Math.
+</h1>
 <p class="font-body-lg text-lg md:text-xl text-emerald-100/70 max-w-2xl mb-10">
-                    We use machine learning to audit your listening habits, identify latent genre clusters, and build high-precision recommendations.
-                </p>
-<div class="flex flex-col items-center gap-4">
-<button class="bg-[#1DB954] text-black px-8 py-4 rounded-full font-semibold text-lg flex items-center gap-3 shadow-lg shadow-[#1DB954]/40 hover:translate-y-[-1px] transition-all active:scale-[0.98]" onclick="console.log('Connecting to Spotify...')">
-<span class="material-symbols-outlined" data-icon="music_note" style="font-variation-settings: 'FILL' 1;">music_note</span>
-                        Connect to Spotify
-                    </button>
-<p class="text-xs text-emerald-200/50 max-w-xs font-label-sm">
-                        Security Note: We only access your listening history to generate your profile. No data is shared with third parties.
-                    </p>
+    Enter 5 songs you love. Our engine will analyze their sonic features and generate a high-precision recommendation profile.
+</p>
+
+<div class="w-full max-w-xl bg-black/40 backdrop-blur-xl p-8 rounded-3xl border border-white/10 shadow-2xl">
+    <form action="/analyze-vibe" method="post" class="space-y-4">
+        <div class="grid gap-3">
+            <div class="input-wrapper">
+                <input type="text" name="track_1" placeholder="Track 1: Song Name - Artist" autocomplete="off" required
+                    class="track-input w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-emerald-100/30 focus:border-[#1DB954] focus:ring-1 focus:ring-[#1DB954] transition-all">
+            </div>
+            <div class="input-wrapper">
+                <input type="text" name="track_2" placeholder="Track 2: Song Name - Artist" autocomplete="off" required
+                    class="track-input w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-emerald-100/30 focus:border-[#1DB954] focus:ring-1 focus:ring-[#1DB954] transition-all">
+            </div>
+            <div class="input-wrapper">
+                <input type="text" name="track_3" placeholder="Track 3: Song Name - Artist" autocomplete="off" required
+                    class="track-input w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-emerald-100/30 focus:border-[#1DB954] focus:ring-1 focus:ring-[#1DB954] transition-all">
+            </div>
+            <div class="input-wrapper">
+                <input type="text" name="track_4" placeholder="Track 4: Song Name - Artist" autocomplete="off" required
+                    class="track-input w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-emerald-100/30 focus:border-[#1DB954] focus:ring-1 focus:ring-[#1DB954] transition-all">
+            </div>
+            <div class="input-wrapper">
+                <input type="text" name="track_5" placeholder="Track 5: Song Name - Artist" autocomplete="off" required
+                    class="track-input w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-emerald-100/30 focus:border-[#1DB954] focus:ring-1 focus:ring-[#1DB954] transition-all">
+            </div>
+        </div>
+        
+        <button type="submit" class="w-full mt-6 bg-[#1DB954] text-black px-8 py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 shadow-lg shadow-[#1DB954]/20 hover:scale-[1.02] active:scale-[0.98] transition-all">
+            <span class="material-symbols-outlined">analytics</span>
+            Analyze My DNA
+        </button>
+    </form>
+    
 </div>
+
 </div>
 </section>
+<!-- AD_BLOCK_START -->
+<div class="max-w-[1200px] mx-auto my-12 px-6">
+    <div class="aads-slot" id="aads-mid">
+        <!-- A-Ads Unit 2436572 -->
+        <iframe data-aa='2436572' src='//acceptable.a-ads.com/2436572/?size=Adaptive'
+                style='border:0; padding:0; width:70%; height:auto; overflow:hidden; display:block; margin:auto;'
+                allowtransparency="true"></iframe>
+    </div>
+</div>
+<!-- AD_BLOCK_END -->
 <!-- Features Grid -->
 <section class="bg-black py-xl px-6 border-y border-white/10">
 <div class="max-w-[1200px] mx-auto">
@@ -186,6 +375,28 @@
 </div>
 </div>
 </section>
+<!-- AD_BLOCK_START -->
+<div class="max-w-[1200px] mx-auto my-12 px-6">
+    <div class="promo-carousel" id="promo-mid">
+        <a href="#" class="promo-banner promo-grad-2 active">
+            <div class="promo-body">
+                <span class="promo-sponsored">Share</span>
+                <div class="promo-title">Share Your Musical DNA</div>
+                <div class="promo-desc">Show friends what makes your taste unique. Analyze and share your sonic fingerprint.</div>
+            </div>
+            <span class="promo-cta">Analyze Now ↑</span>
+        </a>
+        <a href="https://open.spotify.com" target="_blank" rel="noopener" class="promo-banner promo-grad-1">
+            <div class="promo-body">
+                <span class="promo-sponsored">Sponsored</span>
+                <div class="promo-title">Your Year in Music Starts Now</div>
+                <div class="promo-desc">Track your listening habits and discover emerging artists before anyone else.</div>
+            </div>
+            <span class="promo-cta">Explore →</span>
+        </a>
+    </div>
+</div>
+<!-- AD_BLOCK_END -->
 <!-- Technical Deep Dive (Bento Style) -->
 <section class="py-xl px-6 bg-emerald-950">
 <div class="max-w-[1200px] mx-auto">
@@ -211,6 +422,16 @@
 </div>
 </section>
 </main>
+<!-- AD_BLOCK_START -->
+<div class="max-w-[1200px] mx-auto my-12 px-6">
+    <div class="aads-slot" id="aads-bottom">
+        <!-- A-Ads Unit 2436572 -->
+        <iframe data-aa='2436572' src='//acceptable.a-ads.com/2436572/?size=Adaptive'
+                style='border:0; padding:0; width:70%; height:auto; overflow:hidden; display:block; margin:auto;'
+                allowtransparency="true"></iframe>
+    </div>
+</div>
+<!-- AD_BLOCK_END -->
 <!-- Footer -->
 <footer class="bg-black border-t border-white/10">
 <div class="flex flex-col md:flex-row justify-between items-center py-12 px-6 md:px-12 max-w-[1200px] mx-auto gap-6 font-['Inter'] text-sm text-emerald-100/50">
@@ -230,4 +451,77 @@
 </div>
 </div>
 </footer>
+<script>
+document.querySelectorAll('.track-input').forEach(input => {
+    let timeout = null;
+    
+    // Helper to clear suggestions
+    const clearSuggestions = () => {
+        const existing = input.parentNode.querySelector('.autocomplete-suggestions');
+        if (existing) existing.remove();
+    };
+
+    input.addEventListener('input', () => {
+        clearTimeout(timeout);
+        const query = input.value.trim();
+        
+        clearSuggestions();
+
+        if (query.length < 2) return;
+
+        timeout = setTimeout(async () => {
+            // Re-check query after timeout
+            if (input.value.trim().length < 2) return;
+
+            try {
+                const response = await fetch(`/search-tracks?q=${encodeURIComponent(query)}`);
+                const data = await response.json();
+                
+                // Clear again just in case another request finished faster
+                clearSuggestions();
+
+                if (data.tracks && data.tracks.length > 0 && input.value.trim() === query) {
+                    const suggestionsDiv = document.createElement('div');
+                    suggestionsDiv.className = 'autocomplete-suggestions';
+                    
+                    data.tracks.forEach(track => {
+                        const div = document.createElement('div');
+                        div.className = 'autocomplete-suggestion';
+                        div.textContent = track.display;
+                        div.onclick = () => {
+                            input.value = track.display;
+                            clearSuggestions();
+                        };
+                        suggestionsDiv.appendChild(div);
+                    });
+                    
+                    input.parentNode.appendChild(suggestionsDiv);
+                }
+            } catch (err) {
+                console.error('Autocomplete failed', err);
+            }
+        }, 300);
+    });
+
+    // Close suggestions when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!input.contains(e.target)) {
+            clearSuggestions();
+        }
+    });
+});
+</script>
+<script>
+// ── Promo Banner Carousel Rotation ──
+document.querySelectorAll('.promo-carousel').forEach(carousel => {
+    const banners = carousel.querySelectorAll('.promo-banner');
+    if (banners.length <= 1) return;
+    let current = 0;
+    setInterval(() => {
+        banners[current].classList.remove('active');
+        current = (current + 1) % banners.length;
+        banners[current].classList.add('active');
+    }, 8000);
+});
+</script>
 </body></html>
