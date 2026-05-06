@@ -1123,7 +1123,7 @@ def analyze_vibe() -> Any:
         profile = {"display_name": "Music Explorer", "id": "anonymous"}
         return _dashboard_html(
             profile,
-            warning="The standing Spotify dataset did not contain enough rows to build recommendations.",
+            warning="We could not find any recommendations for that song. Can you try again?",
             vibe_data={
                 "seeds": [],
                 "anchor": {"energy": 0.5, "valence": 0.5, "danceability": 0.5},

@@ -322,6 +322,10 @@
             <span class="material-symbols-outlined">analytics</span>
             Analyze My DNA
         </button>
+        <button type="button" id="choose-for-me" class="w-full mt-3 bg-white/10 text-white border border-white/10 px-8 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-3 hover:bg-white/15 active:scale-[0.98] transition-all">
+            <span class="material-symbols-outlined">casino</span>
+            Choose for me
+        </button>
     </form>
     
 </div>
@@ -452,6 +456,20 @@
 </div>
 </footer>
 <script>
+document.getElementById('choose-for-me')?.addEventListener('click', () => {
+    const picks = [
+        'Bad Guy - Billie Eilish',
+        'Nikes - Frank Ocean',
+        'Sicko Mode - Travis Scott',
+        'Get Lucky - Daft Punk',
+        'Yellow - Coldplay'
+    ];
+    document.querySelectorAll('.track-input').forEach((input, index) => {
+        input.value = picks[index] || '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+});
+
 document.querySelectorAll('.track-input').forEach(input => {
     let timeout = null;
     
