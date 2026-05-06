@@ -1341,8 +1341,6 @@ def debug_config() -> Any:
         "request_scheme": request.scheme,
         "x_forwarded_proto": request.headers.get("X-Forwarded-Proto"),
         "client_id_prefix": settings.spotify.client_id[:5] if settings.spotify.client_id else None,
-        "enable_ads": os.environ.get("ENABLE_ADS"),
-        "enable_ads_bool": os.environ.get("ENABLE_ADS", "false").lower() == "true",
     }
 
 
