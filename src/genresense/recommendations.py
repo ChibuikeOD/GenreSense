@@ -529,6 +529,22 @@ class SonicRecommendationEngine:
             "popularity": int(row.get("popularity", 0) or 0),
         }
 
+    def seed_from_query(self, query: str) -> dict[str, Any]:
+        track_name, artist_name = self._parse_query(query)
+        artist_name = artist_name or "Unknown artist"
+        return {
+            "id": f"input_{self._normalize_text(query).replace(' ', '_')}",
+            "name": track_name or query.strip() or "Input song",
+            "artists": [{"name": artist_name}],
+            "album": {"images": [{"url": ""}]},
+            "audio_features": {
+                "energy": 0.5,
+                "valence": 0.5,
+                "danceability": 0.5,
+            },
+            "is_input_only": True,
+        }
+
     def resolve_seeds(self, track_queries: list[str]) -> list[dict[str, Any]]:
         """Resolve user-entered tracks against the standing catalog first."""
         catalog = self._load_catalog()
@@ -539,6 +555,7 @@ class SonicRecommendationEngine:
             if not q.strip():
                 continue
 
+            fallback_seed = self.seed_from_query(q)
             if not catalog.empty:
                 track_query, artist_query = self._parse_query(q)
                 track_norm = self._normalize_text(track_query)
@@ -551,12 +568,12 @@ class SonicRecommendationEngine:
                     artist_matches = candidates[candidates["_artist_norm"].str.contains(artist_norm, regex=False, na=False)]
                     if not artist_matches.empty:
                         candidates = artist_matches
+                    else:
+                        candidates = candidates.iloc[0:0]
 
                 exact = candidates[candidates["_track_norm"] == track_norm]
                 contains = candidates[candidates["_track_norm"].str.contains(track_norm, regex=False, na=False)]
                 match = exact if not exact.empty else contains
-                if match.empty and artist_norm:
-                    match = candidates
 
                 if not match.empty:
                     row = match.sort_values("popularity", ascending=False).iloc[0]
@@ -574,7 +591,11 @@ class SonicRecommendationEngine:
                     seeds.append(tracks[0])
                     seen_ids.add(tracks[0]["id"])
             except Exception:
-                continue
+                pass
+
+            if fallback_seed["id"] not in seen_ids:
+                seeds.append(fallback_seed)
+                seen_ids.add(fallback_seed["id"])
 
         return seeds
 
@@ -667,8 +688,8 @@ class SonicRecommendationEngine:
         pool_df["_artist_norm"] = pool_df["artist_name"].map(self._normalize_text)
         artist_pool = pool_df[pool_df["_artist_norm"].isin(seed_artists)]
         if artist_pool.empty:
-            # If exact artist overlap is absent, fall back to the whole standing catalog.
-            artist_pool = pool_df
+            # If exact artist overlap is absent, fall back to popular standing-catalog tracks.
+            artist_pool = pool_df.sort_values("popularity", ascending=False).head(max(limit * 4, 50))
 
         artist_pool = artist_pool[~artist_pool["track_id"].astype(str).isin(seed_ids)].copy()
         if artist_pool.empty:
@@ -688,7 +709,26 @@ class SonicRecommendationEngine:
         top_matches = artist_pool.sort_values(
             ["artist_overlap", "distance", "popularity"],
             ascending=[False, True, False],
-        ).head(limit)
+        )
+
+        if len(top_matches) < limit:
+            remaining = pool_df[~pool_df["track_id"].astype(str).isin(set(seed_ids) | set(top_matches["track_id"].astype(str)))]
+            remaining = remaining.copy()
+            for feature in target_features:
+                if feature not in remaining.columns:
+                    remaining[feature] = 0.5
+            remaining_matrix = remaining[target_features].fillna(0.5).to_numpy()
+            remaining["distance"] = np.linalg.norm(remaining_matrix - target_vec, axis=1)
+            remaining["artist_overlap"] = 0
+            top_matches = pd.concat(
+                [
+                    top_matches,
+                    remaining.sort_values(["distance", "popularity"], ascending=[True, False]).head(limit - len(top_matches)),
+                ],
+                ignore_index=True,
+            )
+        else:
+            top_matches = top_matches.head(limit)
 
         recommendations = []
         for _, row in top_matches.iterrows():

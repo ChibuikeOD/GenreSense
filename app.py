@@ -1105,21 +1105,40 @@ def analyze_vibe() -> Any:
         request.form.get("track_4", ""),
         request.form.get("track_5", ""),
     ]
+    _agent_log(
+        hypothesis_id="V",
+        message="POST /analyze-vibe entry",
+        data={"non_empty_inputs": len([item for item in track_queries if item.strip()])},
+        run_id="pre",
+    )
     client = _get_client_credentials_client(settings)
     engine = SonicRecommendationEngine(client, settings.rapidapi)
     
     seeds = engine.resolve_seeds(track_queries)
     if not seeds:
-        session["status_message"] = "Could not find any of those tracks. Try being more specific!"
-        return redirect(url_for("index"))
+        seeds = [engine.seed_from_query(query) for query in track_queries if query.strip()]
     
     anchor, recommendations = engine.recommend(seeds, limit=15)
     if not recommendations:
-        session["status_message"] = "I could not find recommendation matches in the standing Spotify dataset. Try songs by artists represented in the catalog."
-        return redirect(url_for("index"))
+        profile = {"display_name": "Music Explorer", "id": "anonymous"}
+        return _dashboard_html(
+            profile,
+            warning="The standing Spotify dataset did not contain enough rows to build recommendations.",
+            vibe_data={
+                "seeds": [],
+                "anchor": {"energy": 0.5, "valence": 0.5, "danceability": 0.5},
+                "recommendations": [],
+                "artist_discovery": [],
+            },
+        )
 
     artist_discovery = engine.get_artist_discovery_playlist(seeds)
-    print(f"DEBUG: Found {len(seeds)} seeds, {len(recommendations)} recommendations, and {len(artist_discovery)} artist discovery tracks.")
+    _agent_log(
+        hypothesis_id="V",
+        message="analyze-vibe built recommendations",
+        data={"seeds": len(seeds), "recommendations": len(recommendations), "artist_discovery": len(artist_discovery)},
+        run_id="pre",
+    )
     
     # Minimize data stored in session to avoid 4KB cookie limit
     def minimize_track(t):
