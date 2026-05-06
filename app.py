@@ -1091,9 +1091,6 @@ def ads_txt() -> Any:
     return "Not Found", 404
 
 
-@app.get("/health")
-
-
 @app.post("/analyze-vibe")
 def analyze_vibe() -> Any:
     try:
@@ -1108,7 +1105,6 @@ def analyze_vibe() -> Any:
         request.form.get("track_4", ""),
         request.form.get("track_5", ""),
     ]
-    
     client = _get_client_credentials_client(settings)
     engine = SonicRecommendationEngine(client, settings.rapidapi)
     
@@ -1118,6 +1114,10 @@ def analyze_vibe() -> Any:
         return redirect(url_for("index"))
     
     anchor, recommendations = engine.recommend(seeds)
+    if not recommendations:
+        session["status_message"] = "I could not find recommendation matches in the standing Spotify dataset. Try songs by artists represented in the catalog."
+        return redirect(url_for("index"))
+
     artist_discovery = engine.get_artist_discovery_playlist(seeds)
     print(f"DEBUG: Found {len(seeds)} seeds, {len(recommendations)} recommendations, and {len(artist_discovery)} artist discovery tracks.")
     
@@ -1147,9 +1147,6 @@ def analyze_vibe() -> Any:
     return redirect(url_for("dashboard_view"))
 
 
-    return redirect(url_for("dashboard_view"))
-
-
 @app.get("/search-tracks")
 def search_tracks() -> Any:
     query = request.args.get("q", "").strip()
@@ -1173,6 +1170,9 @@ def search_tracks() -> Any:
 
 
 @app.get("/logout")
+def logout() -> Any:
+    session.clear()
+    return redirect(url_for("index"))
 
 
 @app.post("/run-pipeline")
@@ -1330,6 +1330,7 @@ def dashboard_view() -> Any:
     client, profile = _get_authenticated_client(settings)
     if not client or not profile:
         return redirect(url_for("index"))
+    return _dashboard_html(profile, warning="No recommendation data is available yet. Enter 5 songs to build your playlist.")
 
 
 @app.get("/debug-config")
