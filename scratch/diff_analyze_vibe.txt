@@ -1,0 +1,144 @@
+--- Diff for analyze_vibe ---
+--- prod
++++ ads
+@@ -11,115 +11,43 @@
+         request.form.get("track_4", ""),
+         request.form.get("track_5", ""),
+     ]
+-    _agent_log(
+-        hypothesis_id="V",
+-        message="POST /analyze-vibe entry",
+-        data={"non_empty_inputs": len([item for item in track_queries if item.strip()])},
+-        run_id="pre",
+-    )
++    
+     client = _get_client_credentials_client(settings)
+     engine = SonicRecommendationEngine(client, settings.rapidapi)
+     
+     seeds = engine.resolve_seeds(track_queries)
+     if not seeds:
+-        seeds = [engine.seed_from_query(query) for query in track_queries if query.strip()]
+-
+-    engine.attach_seed_audio_features(seeds)
+-    anchor = engine.calculate_anchor(seeds)
+-    playlist = engine.playlist_knn_per_seed(seeds, neighbors_per_seed=3, track_queries=track_queries)
+-    if not playlist:
+-        playlist = engine.playlist_three_per_seed(seeds, per_seed=3, track_queries=track_queries)
+-    if not playlist:
+-        _, recs = engine.recommend(
+-            seeds, limit=24, exclude_seed_artists=True, track_queries=track_queries
+-        )
+-        playlist = recs
+-
+-    seed_artist_norms = engine.seed_input_artist_norms(seeds, track_queries)
+-    exclude_ids = {str(s.get("id")) for s in seeds} | {str(p.get("id")) for p in playlist}
+-    landscape_neighbors = engine.knn_landscape_neighbors(
+-        anchor,
+-        exclude_ids=exclude_ids,
+-        limit=36,
+-        exclude_artist_norms=seed_artist_norms,
+-    )
+-
+-    if not playlist:
+-        profile = {"display_name": "Music Explorer", "id": "anonymous"}
+-        return _dashboard_html(
+-            profile,
+-            warning="We could not find any recommendations for that song. Can you try again?",
+-            vibe_data={
+-                "seeds": [],
+-                "anchor": {"energy": 0.5, "valence": 0.5, "danceability": 0.5},
+-                "recommendations": [],
+-                "landscape_neighbors": [],
+-            },
+-        )
+-
+-    _agent_log(
+-        hypothesis_id="V",
+-        message="analyze-vibe built recommendations",
+-        data={
+-            "seeds": len(seeds),
+-            "playlist": len(playlist),
+-            "landscape_neighbors": len(landscape_neighbors),
+-        },
+-        run_id="pre",
+-    )
+-
++        session["status_message"] = "Could not find any of those tracks. Try being more specific!"
++        return redirect(url_for("index"))
++    
++    anchor, recommendations = engine.recommend(seeds)
++    artist_discovery = engine.get_artist_discovery_playlist(seeds)
++    print(f"DEBUG: Found {len(seeds)} seeds, {len(recommendations)} recommendations, and {len(artist_discovery)} artist discovery tracks.")
++    
+     # Minimize data stored in session to avoid 4KB cookie limit
+-    def minimize_track(t: dict[str, Any]) -> dict[str, Any]:
+-        tid = str(t.get("id", ""))
+-        artists = t.get("artists") or [{}]
+-        an0 = artists[0] if isinstance(artists[0], dict) else {}
+-        artist_name = str(an0.get("name") or "")
+-        name = str(t.get("name") or "Unknown track")
+-        af = t.get("audio_features") if isinstance(t.get("audio_features"), dict) else {}
+-
+-        def _f(key: str, default: float = 0.5) -> float:
+-            v = af.get(key)
+-            try:
+-                return float(v) if v is not None else default
+-            except (TypeError, ValueError):
+-                return default
+-
+-        open_url = t.get("open_url")
+-        if not open_url:
+-            open_url = SonicRecommendationEngine.spotify_track_url(tid)
+-        if not open_url and (name or artist_name):
+-            open_url = f"https://open.spotify.com/search/{quote(name + ' ' + artist_name)}"
+-        if not open_url:
+-            open_url = "#"
+-
+-        album = t.get("album") if isinstance(t.get("album"), dict) else {}
+-        images = album.get("images") if isinstance(album.get("images"), list) else []
+-        img0 = images[0] if images and isinstance(images[0], dict) else {}
+-        cover = str(img0.get("url") or "") or SonicRecommendationEngine.default_album_cover_data_uri()
+-
++    def minimize_track(t):
+         return {
+-            "id": tid,
+-            "name": name,
+-            "artists": [{"name": artist_name}],
+-            "album": {"images": [{"url": cover}]},
++            "id": t["id"],
++            "name": t["name"],
++            "artists": [{"name": t["artists"][0]["name"]}],
++            "album": {"images": [{"url": t["album"]["images"][0]["url"]}]} if t.get("album", {}).get("images") else {},
+             "audio_features": {
+-                "energy": _f("energy"),
+-                "valence": _f("valence"),
+-                "danceability": _f("danceability"),
+-            },
+-            "open_url": open_url,
++                "energy": t["audio_features"].get("energy"),
++                "valence": t["audio_features"].get("valence"),
++                "danceability": t["audio_features"].get("danceability")
++            } if "audio_features" in t else {}
+         }
+ 
+     vibe_data = {
+         "seeds": [minimize_track(s) for s in seeds],
+         "anchor": anchor,
+-        "recommendations": [minimize_track(r) for r in playlist],
+-        "landscape_neighbors": [minimize_track(r) for r in landscape_neighbors],
++        "recommendations": [minimize_track(r) for r in recommendations],
++        "artist_discovery": [minimize_track(ad) for ad in artist_discovery]
+     }
+     
+-    profile = {"display_name": "Music Explorer", "id": "anonymous"}
+-    return _dashboard_html(
+-        profile,
+-        info="Your recommendation playlist is ready.",
+-        vibe_data=vibe_data,
+-    )
++    session["vibe_data"] = vibe_data
++    session["analysis_just_finished"] = True
++    return redirect(url_for("dashboard_view"))
++
++
++    return redirect(url_for("dashboard_view"))

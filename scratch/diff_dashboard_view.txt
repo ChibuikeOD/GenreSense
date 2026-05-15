@@ -1,0 +1,8 @@
+--- Diff for dashboard_view ---
+--- prod
++++ ads
+@@ -15,4 +15,3 @@
+     client, profile = _get_authenticated_client(settings)
+     if not client or not profile:
+         return redirect(url_for("index"))
+-    return _dashboard_html(profile, warning="No recommendation data is available yet. Enter 5 songs to build your playlist.")

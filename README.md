@@ -1,6 +1,6 @@
-# GenreSense
+# MelodicMap
 
-GenreSense is a Spotify library auditing and recommendation pipeline that now runs as a Flask web app and is deployable on Vercel.
+MelodicMap is a Spotify library auditing and recommendation pipeline that now runs as a Flask web app and is deployable on Vercel.
 
 ## What it does
 
@@ -18,7 +18,7 @@ GenreSense is a Spotify library auditing and recommendation pipeline that now ru
 |-- UI/landing.html
 |-- requirements.txt
 |-- pyproject.toml
-|-- src/genresense
+|-- src/melodicmap
 |   |-- config.py
 |   |-- features.py
 |   |-- pipeline.py

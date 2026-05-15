@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
-from genresense.schema import AUDIO_FEATURE_COLUMNS
+from melodicmap.schema import AUDIO_FEATURE_COLUMNS
 
 
 class FeatureEngineeringError(ValueError):

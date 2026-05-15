@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
@@ -13,10 +13,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler
 
 import spotipy
-from melodicmap.config import RapidApiSettings
-from melodicmap.schema import AUDIO_FEATURE_COLUMNS
+from genresense.config import RapidApiSettings
+from genresense.schema import AUDIO_FEATURE_COLUMNS
 
-from melodicmap.features import FeatureEngineeringError, FeatureSet
+from genresense.features import FeatureEngineeringError, FeatureSet
 
 
 # Do not treat these as real input artists for cross-artist exclusion.
@@ -441,7 +441,7 @@ class DiscoveryPlaylistBuilder:
         # 4. Fetch Audio Features
         candidate_ids = [t["id"] for t in unique_candidates]
         # Delayed import to avoid circular dependency
-        from melodicmap.spotify_client import SpotifySavedTracksExtractor, build_feature_dataframe
+        from genresense.spotify_client import SpotifySavedTracksExtractor, build_feature_dataframe
         extractor = SpotifySavedTracksExtractor(self.client, self.rapidapi)
         features_dict, warning = extractor._fetch_audio_features(candidate_ids)
         
@@ -496,196 +496,12 @@ class DiscoveryPlaylistBuilder:
 
 
 class SonicRecommendationEngine:
-    def __init__(self, client: spotipy.Spotify, rapidapi: RapidApiSettings, *, db_dsn: str | None = None, db_dataset: str = "GenreSense"):
+    def __init__(self, client: spotipy.Spotify, rapidapi: RapidApiSettings):
         self.client = client
         self.rapidapi = rapidapi
-        self.db_dsn = db_dsn
-        self.db_dataset = db_dataset
         self.catalog_path = Path(__file__).resolve().parents[2] / "data" / "catalog" / "music_universe.csv"
 
-    # ------------------------------------------------------------------
-    # Catalog loading — Postgres primary, CSV fallback
-    # ------------------------------------------------------------------
-
-    def _load_catalog_from_db(self) -> pd.DataFrame:
-        """Load the standing track catalog from the Postgres saved_tracks table.
-
-        The dlt pipeline flattens nested dicts with ``__`` separators and writes
-        list-typed fields (artists) into a child table named
-        ``saved_tracks__artists``.  We JOIN on ``_dlt_root_id`` / ``_dlt_id``
-        to get the first artist name per track.
-        """
-        try:
-            import psycopg2  # optional dependency; only needed here
-        except ImportError:
-            return pd.DataFrame()
-
-        if not self.db_dsn:
-            return pd.DataFrame()
-
-        # Try DSN variants: port 5432 then 6543 (Supabase session pooler)
-        dsn_variants = [self.db_dsn]
-        if ":5432/" in self.db_dsn:
-            dsn_variants.append(self.db_dsn.replace(":5432/", ":6543/"))
-
-        conn = None
-        active_dsn = None
-        for dsn_variant in dsn_variants:
-            try:
-                conn = psycopg2.connect(dsn_variant, connect_timeout=8)
-                active_dsn = dsn_variant
-                break
-            except Exception:
-                continue
-
-        if not conn:
-            return pd.DataFrame()
-
-        try:
-            # 1. Dynamically discover the target schema and see if 'music_universe' exists
-            cur = conn.cursor()
-            
-            # Search for schema name (prioritize staging)
-            cur.execute("""
-                SELECT schema_name 
-                FROM information_schema.schemata 
-                WHERE schema_name NOT IN ('pg_catalog', 'information_schema')
-                ORDER BY 
-                  (schema_name = 'genre_sense_staging') DESC,
-                  (schema_name ILIKE '%genre_sense%') DESC,
-                  schema_name ASC
-                LIMIT 1
-            """)
-            row = cur.fetchone()
-            schema = row[0] if row else self.db_dataset
-
-            # Check if 'music_universe' table exists in this schema
-            cur.execute("""
-                SELECT 1 FROM information_schema.tables 
-                WHERE table_name = 'music_universe' AND table_schema = %s
-            """, (schema,))
-            has_universe = bool(cur.fetchone())
-
-            if has_universe:
-                # --------------------------------------------------------------
-                # CASE A: Load from the optimized global 'music_universe' table!
-                # --------------------------------------------------------------
-                sql = f"""
-                    SELECT 
-                        track_id, track_name, artist_name,
-                        danceability, energy, valence, acousticness, 
-                        tempo, loudness, speechiness, instrumentalness, 
-                        popularity
-                    FROM "{schema}".music_universe
-                    WHERE track_id IS NOT NULL AND track_name IS NOT NULL
-                """
-                df = pd.read_sql_query(sql, conn)
-                cur.close()
-                conn.close()
-                if not df.empty:
-                    return df
-
-            # --------------------------------------------------------------
-            # CASE B: Fallback to dynamic 'saved_tracks' parsing
-            # --------------------------------------------------------------
-            cur.execute("""
-                SELECT 1 FROM information_schema.tables 
-                WHERE table_name = 'saved_tracks' AND table_schema = %s
-            """, (schema,))
-            has_saved_tracks = bool(cur.fetchone())
-            if not has_saved_tracks:
-                cur.close()
-                conn.close()
-                return pd.DataFrame()
-
-            # Fetch columns that actually exist in this table
-            cur.execute("""
-                SELECT column_name 
-                FROM information_schema.columns 
-                WHERE table_name = 'saved_tracks' 
-                  AND table_schema = %s
-            """, (schema,))
-            existing_cols = {r[0] for r in cur.fetchall()}
-            cur.close()
-
-            # Build columns list dynamically to avoid missing column errors (e.g., popularity)
-            cols_to_select = []
-            for col in [
-                "danceability", "energy", "valence",
-                "acousticness", "tempo", "loudness",
-                "speechiness", "instrumentalness",
-            ]:
-                dlt_col = f"audio_features__{col}"
-                if dlt_col in existing_cols:
-                    cols_to_select.append(f'st."{dlt_col}" AS "{col}"')
-                else:
-                    cols_to_select.append(f'0.5 AS "{col}"')
-
-            if "popularity" in existing_cols:
-                cols_to_select.append('COALESCE(st.popularity, 0) AS popularity')
-            else:
-                cols_to_select.append('0 AS popularity')
-
-            feature_cols_sql = ", ".join(cols_to_select)
-
-            # Try queries
-            queries = [
-                f"""
-                SELECT
-                    st.track_id,
-                    st.track_name,
-                    COALESCE(a.artist_name, 'Unknown Artist') AS artist_name,
-                    {feature_cols_sql}
-                FROM "{schema}".saved_tracks st
-                LEFT JOIN LATERAL (
-                    SELECT artist_name
-                    FROM "{schema}"."saved_tracks__artists"
-                    WHERE _dlt_root_id = st._dlt_id
-                    ORDER BY _dlt_list_idx
-                    LIMIT 1
-                ) a ON true
-                WHERE st.track_id IS NOT NULL
-                  AND st.track_name IS NOT NULL
-                """,
-                f"""
-                SELECT
-                    st.track_id,
-                    st.track_name,
-                    'Unknown Artist' AS artist_name,
-                    {feature_cols_sql}
-                FROM "{schema}".saved_tracks st
-                WHERE st.track_id IS NOT NULL
-                  AND st.track_name IS NOT NULL
-                """,
-            ]
-
-            df = pd.DataFrame()
-            for sql in queries:
-                try:
-                    df = pd.read_sql_query(sql, conn)
-                    if not df.empty:
-                        break
-                except Exception:
-                    continue
-            
-            conn.close()
-            return df
-
-        except Exception:
-            try:
-                conn.close()
-            except Exception:
-                pass
-            return pd.DataFrame()
-
     def _load_catalog(self) -> pd.DataFrame:
-        """Return the track catalog. Prefers Postgres; falls back to CSV."""
-        if self.db_dsn:
-            db_catalog = self._load_catalog_from_db()
-            if not db_catalog.empty:
-                return db_catalog
-
-        # CSV fallback (used when DB is unavailable or DSN not provided)
         if not self.catalog_path.exists():
             return pd.DataFrame()
         catalog = pd.read_csv(self.catalog_path)
@@ -1280,7 +1096,6 @@ class SonicRecommendationEngine:
         exclude_ids: set[str],
         limit: int = 32,
         exclude_artist_norms: set[str] | None = None,
-        seeds: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """Catalog tracks closest to the seed anchor in energy/valence/danceability (for viz only)."""
         catalog = self._load_catalog()

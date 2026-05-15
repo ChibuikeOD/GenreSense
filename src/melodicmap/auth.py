@@ -8,7 +8,7 @@ import streamlit as st
 from spotipy.cache_handler import CacheHandler
 from spotipy.oauth2 import SpotifyOAuth
 
-from genresense.config import SpotifySettings
+from melodicmap.config import SpotifySettings
 
 
 TOKEN_INFO_KEY = "spotify_token_info"
@@ -43,7 +43,7 @@ class SpotifyAuthService:
         self.cache_handler = StreamlitSessionCacheHandler()
 
     def build_oauth(self) -> SpotifyOAuth:
-        state = st.session_state.get(STATE_KEY, "genresense-state")
+        state = st.session_state.get(STATE_KEY, "melodicmap-state")
         st.session_state[STATE_KEY] = state
         return SpotifyOAuth(
             client_id=self.settings.client_id,

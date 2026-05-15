@@ -6,7 +6,7 @@ from typing import Any
 import dlt
 from dlt.destinations import postgres
 
-from melodicmap.config import PostgresSettings
+from genresense.config import PostgresSettings
 
 
 @dataclass
@@ -22,7 +22,7 @@ class SpotifyLibraryPipeline:
 
     def load_saved_tracks(self, records: list[dict[str, Any]]) -> LoadResult:
         pipeline = dlt.pipeline(
-            pipeline_name="melodicmap_saved_tracks",
+            pipeline_name="genresense_saved_tracks",
             destination=postgres(credentials=self.settings.dsn),
             dataset_name=self.settings.dataset_name,
         )

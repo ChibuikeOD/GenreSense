@@ -8,7 +8,7 @@ env_vars = {
     "SPOTIFY_REDIRECT_URI": "https://genre-pay.vercel.app/callback",
     "SPOTIFY_SCOPE": "user-library-read playlist-modify-public playlist-modify-private",
     "POSTGRES_DSN": "postgresql://postgres.rrqqicohxdjkvbgrngww:Tyler-Joseph21@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
-    "POSTGRES_DATASET_NAME": "GenreSense",
+    "POSTGRES_DATASET_NAME": "MelodicMap",
     "RAPIDAPI_KEY": "5f9e519fc6msh67128688b054b11p18c55bjsn8cc35912a3d7",
     "RAPIDAPI_HOST": "spotify-extended-audio-features-api.p.rapidapi.com",
     "RAPIDAPI_BASE_URL": "https://spotify-extended-audio-features-api.p.rapidapi.com/v1",

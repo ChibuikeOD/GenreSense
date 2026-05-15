@@ -11,9 +11,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from genresense.config import normalize_spotify_scope
-from genresense.features import FeatureNormalizer
-from genresense.recommendations import MathematicalGenreFinder, PlaylistBuilder
+from melodicmap.config import normalize_spotify_scope
+from melodicmap.features import FeatureNormalizer
+from melodicmap.recommendations import MathematicalGenreFinder, PlaylistBuilder
 
 
 def _sample_dataframe() -> pd.DataFrame:

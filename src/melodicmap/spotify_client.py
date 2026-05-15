@@ -11,8 +11,8 @@ import json
 import time
 from pathlib import Path
 
-from genresense.config import RapidApiSettings
-from genresense.schema import AUDIO_FEATURE_COLUMNS
+from melodicmap.config import RapidApiSettings
+from melodicmap.schema import AUDIO_FEATURE_COLUMNS
 
 
 @dataclass

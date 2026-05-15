@@ -7,7 +7,7 @@ README = Path(__file__).with_name("README.md").read_text(encoding="utf-8")
 
 
 setup(
-    name="genresense",
+    name="melodicmap",
     version="0.1.0",
     description="Spotify library auditing and recommendation pipeline with Flask, dlt, and scikit-learn.",
     long_description=README,

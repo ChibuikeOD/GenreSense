@@ -1,0 +1,1029 @@
+--- Diff for _dashboard_html ---
+--- prod
++++ ads
+@@ -62,23 +62,25 @@
+         viz_json = json.dumps({
+             "seeds": seeds,
+             "anchor": anchor,
+-            "recommendations": recommendations,
+-            "landscape_neighbors": vibe_data.get("landscape_neighbors", []),
++            "recommendations": recommendations
+         })
+         
+         viz_html = """
+         <div class="card" style="background:rgba(0,0,0,0.3); border-color:rgba(255,255,255,0.1); padding:20px; border-radius:12px; margin-top:20px; overflow:hidden;">
+             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+-                <h2 style="margin:0; color:#f8fafc; font-size:20px; font-weight:800;">Melodic Map</h2>
+-                <div style="display:flex; gap:12px; font-size:11px; color:#94a3b8; flex-wrap:wrap;">
+-                    <div style="display:flex; align-items:center; gap:4px;"><div style="width:8px; height:8px; border-radius:50%; background:#fff;"></div> Your songs</div>
+-                    <div style="display:flex; align-items:center; gap:4px;"><div style="width:8px; height:8px; border-radius:50%; background:#1db954;"></div> Acoustic neighbours</div>
+-                    <div style="display:flex; align-items:center; gap:4px;"><div style="width:8px; height:8px; border-radius:50%; background:#64748b;"></div> sonic landscape</div>
++                <div style="display:flex; align-items:center; gap:12px;">
++                    <h2 style="margin:0; color:#f8fafc; font-size:20px; font-weight:800;">KNN Sonic Landscape</h2>
++                    <button onclick="openShareModal('vibe')" class="btn" style="background:#1db954; color:#000; font-size:12px; padding:4px 10px; display:flex; align-items:center; gap:4px; border:0; cursor:pointer; border-radius:6px; font-weight:700;">
++                        <span class="material-symbols-outlined" style="font-size:16px;">share</span> Share
++                    </button>
++                </div>
++                <div style="display:flex; gap:12px; font-size:11px; color:#94a3b8;">
++                    <div style="display:flex; align-items:center; gap:4px;"><div style="width:8px; height:8px; border-radius:50%; background:#fff;"></div> Seed</div>
++                    <div style="display:flex; align-items:center; gap:4px;"><div style="width:8px; height:8px; border-radius:50%; background:#1db954;"></div> Neighbor</div>
+                 </div>
+             </div>
+             <div id="sonic-target-container" style="position:relative; width:100%; height:500px; background:radial-gradient(circle at center, #111827 0%, #000 100%); border-radius:8px; overflow:hidden; border: 1px solid rgba(255,255,255,0.05);">
+-                <canvas id="sonic-target-canvas" style="display:block;width:100%;height:100%;"></canvas>
+-                <div class="sonic-knn-tooltip" style="display:none; position:absolute; pointer-events:none; z-index:20; background:rgba(15,23,42,0.95); border:1px solid rgba(255,255,255,0.15); padding:8px 12px; border-radius:8px; max-width:280px; font-size:12px; font-family:Inter,system-ui,sans-serif; color:#e2e8f0; box-shadow:0 8px 24px rgba(0,0,0,0.4);"></div>
++                <canvas id="sonic-target-canvas"></canvas>
+                 <div style="position:absolute; bottom:10px; right:10px; color:#64748b; font-size:11px; pointer-events:none;">High Valence &rarr;</div>
+                 <div style="position:absolute; top:10px; left:10px; color:#64748b; font-size:11px; pointer-events:none;">&uarr; High Energy</div>
+             </div>
+@@ -86,353 +88,168 @@
+         
+         <script>
+         (function() {
+-            const data = """ + viz_json + """;
++            window.vibeData = """ + viz_json + """;
++            const data = window.vibeData;
+             const container = document.getElementById('sonic-target-container');
+             const canvas = document.getElementById('sonic-target-canvas');
+             const ctx = canvas.getContext('2d');
+-            const tipEl = container.querySelector('.sonic-knn-tooltip');
+             
+             let width, height;
+-            if (tipEl) {
+-                tipEl.style.display = 'none';
+-                tipEl.innerHTML = '';
+-            }
+-            
+-            function feat(o, k) {
+-                const v = o && o.audio_features && o.audio_features[k];
+-                return (typeof v === 'number' && !isNaN(v)) ? v : 0.5;
+-            }
+-            function esc(s) {
+-                return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+-            }
+-            /* Wider spread in feature space + inset plot box so points sit farther apart on screen. */
+-            const FEATURE_SPREAD = 1.52;
+-            const PLOT_INSET = 0.13;
+-            function tvToPixel(tv, te, w, h) {
+-                const span = 1 - 2 * PLOT_INSET;
+-                let pv = 0.5 + (tv - 0.5) * FEATURE_SPREAD;
+-                let pe = 0.5 + (te - 0.5) * FEATURE_SPREAD;
+-                pv = Math.max(-0.06, Math.min(1.06, pv));
+-                pe = Math.max(-0.06, Math.min(1.06, pe));
+-                return {
+-                    x: (PLOT_INSET + pv * span) * w,
+-                    y: (1 - (PLOT_INSET + pe * span)) * h
+-                };
+-            }
+-            
+-            function measureCanvas() {
+-                width = container.clientWidth || 1;
+-                height = container.clientHeight || 1;
+-                const dpr = window.devicePixelRatio || 1;
+-                canvas.width = Math.floor(width * dpr);
+-                canvas.height = Math.floor(height * dpr);
++            function resize() {
++                width = container.offsetWidth;
++                height = container.offsetHeight;
++                canvas.width = width * window.devicePixelRatio;
++                canvas.height = height * window.devicePixelRatio;
+                 canvas.style.width = width + 'px';
+                 canvas.style.height = height + 'px';
+-                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
++                ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+             }
+-            measureCanvas();
++            window.addEventListener('resize', resize);
++            resize();
+             
+             const nodes = [];
+             
++            // Map tracks to coordinates based on Energy and Valence
++            // Energy -> Y (inverted), Valence -> X
+             data.seeds.forEach((s) => {
+-                const v = feat(s, 'valence'), e = feat(s, 'energy');
++                const x = 50 + (s.audio_features.valence - data.anchor.valence) * 300;
++                const y = 50 - (s.audio_features.energy - data.anchor.energy) * 300;
+                 nodes.push({
+                     type: 'seed',
+-                    tv: v, te: e,
+-                    vx: 0, vy: 0,
+-                    label: s.name || 'Your song',
+-                    artist: (s.artists && s.artists[0] && s.artists[0].name) || '',
++                    targetX: (s.audio_features.valence * 0.8 + 0.1) * width,
++                    targetY: (1 - (s.audio_features.energy * 0.8 + 0.1)) * height,
++                    x: Math.random() * width,
++                    y: Math.random() * height,
++                    label: s.name,
++                    artist: s.artists[0].name,
+                     color: '#fff',
+                     size: 8,
+-                    glow: 15,
+-                    url: s.open_url || null
++                    glow: 15
+                 });
+             });
+             
+             data.recommendations.forEach((r) => {
+-                const v = feat(r, 'valence'), e = feat(r, 'energy');
+                 nodes.push({
+                     type: 'neighbor',
+-                    tv: v, te: e,
+-                    vx: 0, vy: 0,
+-                    label: r.name || 'Track',
+-                    artist: (r.artists && r.artists[0] && r.artists[0].name) || '',
+-                    url: r.open_url || null,
++                    targetX: (r.audio_features.valence * 0.8 + 0.1) * width,
++                    targetY: (1 - (r.audio_features.energy * 0.8 + 0.1)) * height,
++                    x: Math.random() * width,
++                    y: Math.random() * height,
++                    label: r.name,
++                    artist: r.artists[0].name,
++                    url: 'https://open.spotify.com/track/' + r.id,
+                     color: '#1db954',
+                     size: 5,
+                     glow: 10
+                 });
+             });
+             
+-            (data.landscape_neighbors || []).forEach((r) => {
+-                const v = feat(r, 'valence'), e = feat(r, 'energy');
+-                nodes.push({
+-                    type: 'landscape',
+-                    tv: v, te: e,
+-                    vx: 0, vy: 0,
+-                    label: r.name || 'Track',
+-                    artist: (r.artists && r.artists[0] && r.artists[0].name) || '',
+-                    url: r.open_url || null,
+-                    color: '#94a3b8',
+-                    size: 3.5,
+-                    glow: 6
+-                });
+-            });
+-
+-            // Spread stacked seeds (same energy/valence) so KNN edges stay readable
+-            (function unstackSeeds() {
+-                const seedsOnly = nodes.filter(n => n.type === 'seed');
+-                const groups = new Map();
+-                seedsOnly.forEach(n => {
+-                    const k = n.tv.toFixed(4) + ',' + n.te.toFixed(4);
+-                    if (!groups.has(k)) groups.set(k, []);
+-                    groups.get(k).push(n);
+-                });
+-                groups.forEach(arr => {
+-                    if (arr.length < 2) return;
+-                    const radius = 0.045;
+-                    arr.forEach((n, i) => {
+-                        const ang = (2 * Math.PI * i) / arr.length;
+-                        n.tv = Math.min(1, Math.max(0, n.tv + Math.cos(ang) * radius));
+-                        n.te = Math.min(1, Math.max(0, n.te + Math.sin(ang) * radius));
+-                    });
+-                });
+-            })();
+-            
+-            function syncNodeTargets() {
+-                nodes.forEach(n => {
+-                    const p = tvToPixel(n.tv, n.te, width, height);
+-                    n.targetX = p.x;
+-                    n.targetY = p.y;
+-                    if (n.x === undefined) {
+-                        n.x = p.x + (Math.random() - 0.5) * 42;
+-                        n.y = p.y + (Math.random() - 0.5) * 42;
+-                    }
+-                });
+-            }
+-            function resize() {
+-                measureCanvas();
+-                syncNodeTargets();
+-            }
+-            window.addEventListener('resize', resize);
+-            
+-            function stepPhysics() {
+-                const kSpringSeed = 0.055;
+-                const kSpringOther = 0.038;
+-                for (const n of nodes) {
+-                    const k = n.type === 'seed' ? kSpringSeed : kSpringOther;
+-                    n.vx += (n.targetX - n.x) * k;
+-                    n.vy += (n.targetY - n.y) * k;
+-                }
+-                const repulse = 3.4;
+-                for (let i = 0; i < nodes.length; i++) {
+-                    for (let j = i + 1; j < nodes.length; j++) {
+-                        const a = nodes[i], b = nodes[j];
+-                        let dx = b.x - a.x, dy = b.y - a.y;
+-                        let dist = Math.sqrt(dx * dx + dy * dy);
+-                        const minD = a.size + b.size + 13;
+-                        if (dist < 1e-6) {
+-                            dx = (Math.random() - 0.5);
+-                            dy = (Math.random() - 0.5);
+-                            dist = Math.sqrt(dx * dx + dy * dy) || 1e-6;
+-                        }
+-                        if (dist < minD) {
+-                            const push = (minD - dist) / minD * repulse;
+-                            dx /= dist;
+-                            dy /= dist;
+-                            const massA = a.type === 'seed' ? 2.4 : 1;
+-                            const massB = b.type === 'seed' ? 2.4 : 1;
+-                            const inv = 1 / (massA + massB);
+-                            a.vx -= dx * push * massB * inv;
+-                            a.vy -= dy * push * massB * inv;
+-                            b.vx += dx * push * massA * inv;
+-                            b.vy += dy * push * massA * inv;
+-                        }
+-                    }
+-                }
+-                const damp = 0.885;
+-                for (const n of nodes) {
+-                    n.vx *= damp;
+-                    n.vy *= damp;
+-                    n.x += n.vx;
+-                    n.y += n.vy;
+-                    const r = n.size + 8;
+-                    if (n.x < r) { n.x = r; n.vx *= -0.42; }
+-                    else if (n.x > width - r) { n.x = width - r; n.vx *= -0.42; }
+-                    if (n.y < r) { n.y = r; n.vy *= -0.42; }
+-                    else if (n.y > height - r) { n.y = height - r; n.vy *= -0.42; }
+-                }
+-            }
+-
+-            function pickNode(mx, my) {
+-                let best = null, bestDist = Infinity;
+-                for (const n of nodes) {
+-                    const dx = n.x - mx, dy = n.y - my;
+-                    const d = Math.sqrt(dx * dx + dy * dy);
+-                    const hitR = n.size + 14;
+-                    if (d <= hitR && d < bestDist) {
+-                        bestDist = d;
+-                        best = n;
+-                    }
+-                }
+-                return best;
+-            }
+-
+-            function positionTooltip(clientX, clientY) {
+-                if (!tipEl) return;
+-                const crect = container.getBoundingClientRect();
+-                tipEl.style.display = 'block';
+-                const pad = 10;
+-                let left = clientX - crect.left + pad;
+-                let top = clientY - crect.top + pad;
+-                const tw = tipEl.offsetWidth || 260;
+-                const th = tipEl.offsetHeight || 48;
+-                if (left + tw > container.clientWidth - pad) left = container.clientWidth - tw - pad;
+-                if (top + th > container.clientHeight - pad) top = container.clientHeight - th - pad;
+-                if (left < pad) left = pad;
+-                if (top < pad) top = pad;
+-                tipEl.style.left = left + 'px';
+-                tipEl.style.top = top + 'px';
+-            }
+-            
+-            function nearestSeed(n) {
+-                let best = null, bd = 1e9;
+-                for (const s of nodes) {
+-                    if (s.type !== 'seed') continue;
+-                    const d = (n.tv - s.tv) * (n.tv - s.tv) + (n.te - s.te) * (n.te - s.te);
+-                    if (d < bd) { bd = d; best = s; }
+-                }
+-                return best;
+-            }
+-            
+             function draw() {
+-                if (!width || !height) {
+-                    requestAnimationFrame(draw);
+-                    return;
+-                }
+-                ctx.save();
+-                ctx.setTransform(1, 0, 0, 1, 0, 0);
+-                ctx.clearRect(0, 0, canvas.width, canvas.height);
+-                ctx.restore();
+-                ctx.fillStyle = '#050608';
++                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                 ctx.fillRect(0, 0, width, height);
+                 
+-                ctx.strokeStyle = 'rgba(255,255,255,0.04)';
++                // Draw grid lines
++                ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+                 ctx.lineWidth = 1;
+                 for(let i=1; i<10; i++) {
+                     ctx.beginPath(); ctx.moveTo(i*width/10, 0); ctx.lineTo(i*width/10, height); ctx.stroke();
+                     ctx.beginPath(); ctx.moveTo(0, i*height/10); ctx.lineTo(width, i*height/10); ctx.stroke();
+                 }
+ 
+-                syncNodeTargets();
+-                stepPhysics();
+-                stepPhysics();
+-                
++                // Smoothly animate nodes to their targets
+                 nodes.forEach(n => {
+-                    if (n.type === 'neighbor' || n.type === 'landscape') {
+-                        const s = nearestSeed(n);
+-                        if (s) {
+-                            ctx.beginPath();
+-                            const alpha = n.type === 'neighbor' ? 0.45 : 0.22;
+-                            ctx.strokeStyle = n.type === 'neighbor' ? 'rgba(29, 185, 84, ' + alpha + ')' : 'rgba(148, 163, 184, ' + alpha + ')';
+-                            ctx.lineWidth = n.type === 'neighbor' ? 1.25 : 0.85;
+-                            ctx.moveTo(n.x, n.y);
+-                            ctx.lineTo(s.x, s.y);
+-                            ctx.stroke();
+-                        }
++                    n.x += (n.targetX - n.x) * 0.05;
++                    n.y += (n.targetY - n.y) * 0.05;
++                    
++                    // Draw connections for seeds
++                    if (n.type === 'seed') {
++                        nodes.forEach(m => {
++                            if (m.type === 'neighbor') {
++                                const dist = Math.sqrt((n.x-m.x)**2 + (n.y-m.y)**2);
++                                if (dist < 150) {
++                                    ctx.beginPath();
++                                    ctx.strokeStyle = `rgba(29, 185, 84, ${0.2 * (1 - dist/150)})`;
++                                    ctx.moveTo(n.x, n.y);
++                                    ctx.lineTo(m.x, m.y);
++                                    ctx.stroke();
++                                }
++                            }
++                        });
+                     }
+-                });
+-
+-                nodes.forEach(n => {
++
+                     ctx.shadowBlur = n.glow;
+                     ctx.shadowColor = n.color;
+                     ctx.fillStyle = n.color;
+                     ctx.beginPath();
+                     ctx.arc(n.x, n.y, n.size, 0, Math.PI * 2);
+                     ctx.fill();
++                    
+                     ctx.shadowBlur = 0;
++                    if (n.type === 'seed') {
++                        ctx.fillStyle = 'rgba(255,255,255,0.8)';
++                        ctx.font = '600 11px Inter';
++                        ctx.textAlign = 'center';
++                        ctx.fillText(n.label, n.x, n.y + n.size + 15);
++                    }
+                 });
+                 
+                 requestAnimationFrame(draw);
+             }
+             draw();
+             
+-            canvas.addEventListener('mousemove', (e) => {
+-                const rect = canvas.getBoundingClientRect();
+-                const mx = e.clientX - rect.left;
+-                const my = e.clientY - rect.top;
+-                const hit = pickNode(mx, my);
+-                canvas.style.cursor = hit ? 'pointer' : 'default';
+-                if (hit && tipEl) {
+-                    let sub = hit.type === 'landscape' ? '<br/><span style="color:#64748b;font-size:10px;">sonic landscape (near your anchor in energy/valence)</span>' : (hit.type === 'neighbor' ? '<br/><span style="color:#22c55e;font-size:10px;">Acoustic neighbours (similar audio features)</span>' : '<br/><span style="color:#e2e8f0;font-size:10px;">Your songs</span>');
+-                    tipEl.innerHTML = '<strong>' + esc(hit.label) + '</strong><br/><span style="color:#94a3b8">' + esc(hit.artist) + '</span>' + sub;
+-                    positionTooltip(e.clientX, e.clientY);
+-                } else if (tipEl) {
+-                    tipEl.style.display = 'none';
+-                    tipEl.innerHTML = '';
+-                }
+-            });
+-            canvas.addEventListener('mouseleave', () => {
+-                if (tipEl) {
+-                    tipEl.style.display = 'none';
+-                    tipEl.innerHTML = '';
+-                }
+-                canvas.style.cursor = 'default';
+-            });
+-            
+             canvas.onclick = (e) => {
+                 const rect = canvas.getBoundingClientRect();
+                 const mx = e.clientX - rect.left;
+                 const my = e.clientY - rect.top;
+-                const hit = pickNode(mx, my);
+-                if (hit && hit.url && hit.url !== '#') {
+-                    window.open(hit.url, '_blank');
+-                }
++                
++                nodes.forEach(n => {
++                    const dx = n.x - mx;
++                    const dy = n.y - my;
++                    if (Math.sqrt(dx*dx + dy*dy) < 15 && n.url) {
++                        window.open(n.url, '_blank');
++                    }
++                });
+             };
+         })();
+         </script>
+ 
+         <div style="margin-top:40px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+             <div>
+-                <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+-                    <span class="material-symbols-outlined text-[#1db954]">playlist_play</span>
+-                    Recommended playlist (""" + str(len(recommendations)) + """ tracks)
++                <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:20px; display:flex; align-items:center; gap:8px;">
++                    <span class="material-symbols-outlined text-[#1db954]">hub</span>
++                    Nearest Neighbors (KNN)
+                 </h3>
+-                <p style="color:#94a3b8; font-size:12px; margin:0 0 16px 0;">Three recommendations per song: nearest neighbors in the standing catalog by scaled audio features. <strong>Other artists only</strong>—your input artists are excluded so you get similar sound, not the same act. Fallback uses anchor distance without repeating seed acts. Each row opens Spotify search for that title and artist.</p>
+                 <div style="display:grid; gap:12px;">
+                     """ + "".join([f'''
+-                    <a href="{html.escape(str(r.get("open_url") or "#"), quote=True)}" target="_blank" rel="noopener noreferrer"
++                    <a href="https://open.spotify.com/track/{r['id']}" target="_blank" 
+                        class="card" style="display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; text-decoration:none; transition:all 0.2s; overflow:hidden;">
+-                        <div class="track-row-icon" aria-hidden="true" style="width:40px;height:40px;border-radius:4px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="#1db954"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>
+-                        </div>
++                        <img src="{r['album']['images'][0]['url'] if r.get('album', {}).get('images') else ''}" 
++                             style="width:40px; height:40px; border-radius:4px; object-fit:cover; background:#222;" alt="Album Art">
+                         <div style="flex:1; min-width:0;">
+-                            <div style="color:#fff; font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{html.escape(str(r.get("name") or ""))}</div>
+-                            <div style="color:#94a3b8; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{html.escape(str((r.get("artists") or [{{}}])[0].get("name") or ""))}</div>
++                            <div style="color:#fff; font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['name']}</div>
++                            <div style="color:#94a3b8; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['artists'][0]['name']}</div>
+                         </div>
+                     </a>
+-                    ''' for r in recommendations]) + """
++                    ''' for r in recommendations[:10]]) + """
+                 </div>
+             </div>
+             <div>
+-                <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+-                    <span class="material-symbols-outlined text-[#1db954]">graphic_eq</span>
+-                    Your songs
++                <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:20px; display:flex; align-items:center; gap:8px;">
++                    <span class="material-symbols-outlined text-[#1db954]">person_search</span>
++                    Artist Discovery (3/Artist)
+                 </h3>
+-                <p style="color:#94a3b8; font-size:12px; margin:0 0 16px 0;">Songs you entered anchor the Melodic Map (energy vs valence).</p>
+                 <div style="display:grid; gap:12px;">
+                     """ + "".join([f'''
+-                    <a href="{html.escape(str(s.get("open_url") or "#"), quote=True)}" target="_blank" rel="noopener noreferrer"
++                    <a href="https://open.spotify.com/track/{r['id']}" target="_blank" 
+                        class="card" style="display:flex; align-items:center; gap:12px; padding:10px; background:rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; text-decoration:none; transition:all 0.2s; overflow:hidden;">
+-                        <div class="track-row-icon" aria-hidden="true" style="width:40px;height:40px;border-radius:4px;background:rgba(0,0,0,0.35);border:1px solid rgba(255,255,255,0.08);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" fill="#94a3b8"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>
+-                        </div>
++                        <img src="{r['album']['images'][0]['url'] if r.get('album', {}).get('images') else ''}" 
++                             style="width:40px; height:40px; border-radius:4px; object-fit:cover; background:#222;" alt="Album Art">
+                         <div style="flex:1; min-width:0;">
+-                            <div style="color:#fff; font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{html.escape(str(s.get("name") or ""))}</div>
+-                            <div style="color:#94a3b8; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{html.escape(str((s.get("artists") or [{{}}])[0].get("name") or ""))}</div>
++                            <div style="color:#fff; font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['name']}</div>
++                            <div style="color:#94a3b8; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{r['artists'][0]['name']}</div>
+                         </div>
+                     </a>
+-                    ''' for s in seeds]) + """
++                    ''' for r in vibe_data.get('artist_discovery', [])]) + """
+                 </div>
+             </div>
+         </div>
+@@ -442,6 +259,17 @@
+         viz_data = cluster_result.clustered_frame
+         chart_data = viz_data[["track_name", "artist_name", "cluster_id", "valence", "energy"]].to_dict(orient="records")
+         chart_json = json.dumps(chart_data)
++        
++        summaries_list = [{
++            "cluster_id": int(s.cluster_id),
++            "label": str(s.label),
++            "track_count": int(s.track_count),
++            "share": float(s.share),
++            "avg_energy": float(s.avg_energy),
++            "avg_tempo": float(s.avg_tempo),
++            "representative_track": str(s.representative_track)
++        } for s in cluster_result.summaries]
++        summaries_json = json.dumps(summaries_list)
+         
+         legend_items = []
+         for summary in cluster_result.summaries:
+@@ -455,7 +283,7 @@
+               <h2 style="margin:0; color:#f8fafc; font-size:20px; font-weight:800;">
+                 Your Acoustic Landscape
+               </h2>
+-              <button onclick="shareLandscape()" class="btn" style="background:#1db954; color:#000; font-size:12px; padding:4px 10px; display:flex; align-items:center; gap:4px; border:0; cursor:pointer; border-radius:6px; font-weight:700;">
++              <button onclick="openShareModal('library')" class="btn" style="background:#1db954; color:#000; font-size:12px; padding:4px 10px; display:flex; align-items:center; gap:4px; border:0; cursor:pointer; border-radius:6px; font-weight:700;">
+                 <span class="material-symbols-outlined" style="font-size:16px;">share</span> Share
+               </button>
+             </div>
+@@ -478,7 +306,9 @@
+         
+         <script>
+           (function() {{
+-            const data = {chart_json};
++            window.clusterData = {chart_json};
++            window.clusterSummaries = {summaries_json};
++            const data = window.clusterData;
+             const container = document.getElementById('knn-container');
+             const colors = ['#10b981', '#a78bfa'];
+             const REPEL_RADIUS = 60;
+@@ -569,51 +399,6 @@
+             
+             tick();
+ 
+-            window.shareLandscape = async function() {{
+-              const card = document.getElementById('knn-card');
+-              const btn = event.currentTarget;
+-              const originalText = btn.innerHTML;
+-              
+-              try {{
+-                btn.innerHTML = 'Capturing...';
+-                btn.disabled = true;
+-                
+-                const canvas = await html2canvas(card, {{
+-                  backgroundColor: '#064e3b',
+-                  scale: 2,
+-                  useCORS: true,
+-                  logging: false
+-                }});
+-                
+-                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+-                const file = new File([blob], 'my-acoustic-landscape.png', {{ type: 'image/png' }});
+-                
+-                if (navigator.share && navigator.canShare && navigator.canShare({{ files: [file] }})) {{
+-                  await navigator.share({{
+-                    title: 'My Acoustic Landscape',
+-                    text: 'Check out my musical identity on GenreSense! 🎵',
+-                    url: window.location.origin,
+-                    files: [file]
+-                  }});
+-                }} else {{
+-                  // Fallback for desktop: Download + copy link
+-                  const url = canvas.toDataURL('image/png');
+-                  const link = document.createElement('a');
+-                  link.download = 'my-acoustic-landscape.png';
+-                  link.href = url;
+-                  link.click();
+-                  
+-                  await navigator.clipboard.writeText(window.location.origin);
+-                  alert('Landscape downloaded! Share it on social media with this link: ' + window.location.origin + ' (Link copied to clipboard)');
+-                }}
+-              }} catch (err) {{
+-                console.error('Share failed:', err);
+-                alert('Could not share. You can try taking a screenshot!');
+-              }} finally {{
+-                btn.innerHTML = originalText;
+-                btn.disabled = false;
+-              }}
+-            }};
+           }})();
+         </script>
+         """
+@@ -637,15 +422,25 @@
+             selected_visibility=selected_visibility,
+         )
+ 
++    ad_slot_top_html = ""
+     ad_slot_html = ""
+     if os.environ.get("ENABLE_ADS", "false").lower() == "true":
++        ad_slot_top_html = """
++        <!-- BEGIN AADS AD UNIT 2437638 -->
++        <div id="frame" style="width: 100%; margin: 20px auto; position: relative; z-index: 99998;">
++          <iframe data-aa='2437638' src='//acceptable.a-ads.com/2437638/?size=Adaptive'
++                  style='border:0; padding:0; width:70%; height:auto; overflow:hidden; display: block; margin: auto'></iframe>
++        </div>
++        <!-- END AADS AD UNIT 2437638 -->
++        """
++        
+         ad_slot_html = """
+-        <!-- Dashboard Ad Slot -->
+-        <div style="margin-top:40px; padding:20px; background:rgba(0,0,0,0.25); border:1px dashed rgba(255,255,255,0.1); border-radius:12px; text-align:center;">
+-            <iframe data-aa='2436572' src='//acceptable.a-ads.com/2436572/?size=Adaptive'
+-                    style='border:0; padding:0; width:100%; height:90px; overflow:hidden; display:block; margin:auto;'
+-                    allowtransparency="true"></iframe>
+-        </div>
++        <!-- BEGIN AADS AD UNIT 2437621 -->
++        <div id="frame" style="width: 100%; margin: 40px auto auto; position: relative; z-index: 99998;">
++          <iframe data-aa='2437621' src='//acceptable.a-ads.com/2437621/?size=Adaptive'
++                  style='border:0; padding:0; width:70%; height:auto; overflow:hidden; display: block; margin: auto'></iframe>
++        </div>
++        <!-- END AADS AD UNIT 2437621 -->
+         """
+ 
+     return f"""
+@@ -654,7 +449,7 @@
+     <head>
+       <meta charset="utf-8">
+       <meta name="viewport" content="width=device-width, initial-scale=1">
+-      <title>GenreSense Dashboard</title>
++      <title>MelodicMap Dashboard</title>
+       <style>
+         body {{ font-family: Inter, Arial, sans-serif; margin: 0; background: #064e3b; color: #fff; }}
+         .wrap {{ max-width: 1100px; margin: 0 auto; padding: 26px 18px 42px; }}
+@@ -704,12 +499,29 @@
+             opacity: 1;
+             bottom: 20px;
+         }}
++        .spinner {{
++            width: 32px;
++            height: 32px;
++            border: 4px solid rgba(29, 185, 84, 0.1);
++            border-top: 4px solid #1db954;
++            border-radius: 50%;
++            animation: spin 1s linear infinite;
++        }}
++        @keyframes spin {{
++            0% {{ transform: rotate(0deg); }}
++            100% {{ transform: rotate(360deg); }}
++        }}
++        @keyframes modalFadeIn {{
++            from {{ opacity: 0; transform: scale(0.96); }}
++            to {{ opacity: 1; transform: scale(1); }}
++        }}
+       </style>
++      <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+     </head>
+     <body>
+       <div class="wrap">
+         <div style="text-align:center; margin-bottom:32px;">
+-          <h1 style="margin:0; font-size:42px; font-weight:900; letter-spacing:-0.04em; color:#fff;">GenreSense</h1>
++          <h1 style="margin:0; font-size:42px; font-weight:900; letter-spacing:-0.04em; color:#fff;">MelodicMap</h1>
+           <p style="margin:8px 0 0; color:#a1a1aa; font-size:14px;">Authenticated as {html.escape(profile.get("display_name") or profile.get("id") or "Spotify user")}.</p>
+         </div>
+         <div class="top">
+@@ -723,10 +535,391 @@
+         <div style="margin-top:14px;display:grid;gap:10px;">
+           {''.join(alerts)}
+         </div>
++        {ad_slot_top_html}
+         {genre_html}
+         {viz_html}
+         {ad_slot_html}
+       </div>
++
++      <!-- ── HIDDEN SHARING GRAPHIC TARGET ── -->
++      <div style="position: absolute; top: -9999px; left: -9999px; pointer-events: none;">
++        <div id="share-canvas-target" style="width: 1080px; height: 1350px; background: radial-gradient(circle at 50% 50%, #042f24 0%, #000000 100%); color: white; font-family: 'Inter', -apple-system, sans-serif; padding: 80px 60px; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; overflow: hidden; position: relative;">
++          <!-- Radial Glow Background Accents -->
++          <div style="position: absolute; top: -200px; right: -200px; width: 700px; height: 700px; border-radius: 50%; background: radial-gradient(circle, rgba(29, 185, 84, 0.18) 0%, transparent 70%); pointer-events: none;"></div>
++          <div style="position: absolute; bottom: -200px; left: -200px; width: 700px; height: 700px; border-radius: 50%; background: radial-gradient(circle, rgba(29, 185, 84, 0.12) 0%, transparent 70%); pointer-events: none;"></div>
++          
++          <!-- Top Header Banner -->
++          <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2px solid rgba(255,255,255,0.1); padding-bottom: 32px; z-index: 2; width: 100%;">
++            <div>
++              <h1 style="margin: 0; font-size: 76px; font-weight: 900; letter-spacing: -0.04em; text-transform: uppercase; line-height: 0.9; background: linear-gradient(120deg, #ffffff 0%, #1db954 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">MelodicMap</h1>
++              <p id="share-subtitle" style="margin: 12px 0 0 0; font-size: 22px; font-weight: 600; color: #a1a1aa; letter-spacing: 0.15em; text-transform: uppercase;">Acoustic DNA Signature</p>
++            </div>
++            <div style="text-align: right;">
++              <p style="margin: 0; font-size: 18px; color: #1db954; font-weight: 800; text-transform: uppercase; letter-spacing: 0.2em; border: 1px solid rgba(29,185,84,0.3); padding: 6px 16px; border-radius: 99px; background: rgba(29,185,84,0.05);">Sonic Engine v2.1</p>
++            </div>
++          </div>
++          
++          <!-- Middle: Visualizer Display Frame -->
++          <div style="flex-grow: 1; display: flex; flex-direction: column; justify-content: center; padding: 40px 0; z-index: 2; width: 100%;">
++            <div style="font-size: 16px; font-weight: 700; letter-spacing: 0.08em; color: #64748b; text-transform: uppercase; margin-bottom: 14px;">Spatial Landscape Mapping</div>
++            <div id="share-viz-container" style="width: 100%; height: 560px; border-radius: 24px; border: 2px solid rgba(255,255,255,0.1); background: radial-gradient(circle at 50% 50%, #080c15 0%, #000000 100%); overflow: hidden; position: relative; box-shadow: inset 0 0 40px rgba(0,0,0,0.8);">
++              <!-- Canvas copy or cloned node cluster inserted here -->
++            </div>
++          </div>
++          
++          <!-- Bottom Section: Stat Metrics & Playlist Grid -->
++          <div style="display: grid; grid-template-columns: 1.2fr 0.8fr; gap: 60px; z-index: 2; width: 100%;">
++            <!-- Column A: Stat Slider Widgets -->
++            <div style="display: flex; flex-direction: column; gap: 28px;">
++              <h3 style="margin: 0; font-size: 26px; font-weight: 800; border-bottom: 2px solid rgba(255,255,255,0.05); padding-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em;">Sonic Coordinates</h3>
++              
++              <!-- Energy Widget -->
++              <div>
++                <div style="display: flex; justify-content: space-between; font-size: 20px; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em;">
++                  <span>Energy (Drive)</span>
++                  <span id="share-stat-energy-val" style="color: #1db954;">0.00</span>
++                </div>
++                <div style="height: 18px; background: rgba(255,255,255,0.08); border-radius: 9px; overflow: hidden; padding: 2px;">
++                  <div id="share-stat-energy-bar" style="height: 100%; background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%); border-radius: 7px; width: 0%; box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);"></div>
++                </div>
++              </div>
++              
++              <!-- Valence Widget -->
++              <div>
++                <div style="display: flex; justify-content: space-between; font-size: 20px; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em;">
++                  <span>Valence (Mood)</span>
++                  <span id="share-stat-valence-val" style="color: #1db954;">0.00</span>
++                </div>
++                <div style="height: 18px; background: rgba(255,255,255,0.08); border-radius: 9px; overflow: hidden; padding: 2px;">
++                  <div id="share-stat-valence-bar" style="height: 100%; background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%); border-radius: 7px; width: 0%; box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);"></div>
++                </div>
++              </div>
++              
++              <!-- Extra Widget (Customizable) -->
++              <div id="share-stat-extra-container">
++                <div style="display: flex; justify-content: space-between; font-size: 20px; font-weight: 700; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em;">
++                  <span id="share-stat-extra-label">Danceability</span>
++                  <span id="share-stat-extra-val" style="color: #1db954;">0.00</span>
++                </div>
++                <div style="height: 18px; background: rgba(255,255,255,0.08); border-radius: 9px; overflow: hidden; padding: 2px;">
++                  <div id="share-stat-extra-bar" style="height: 100%; background: linear-gradient(90deg, #16a34a 0%, #22c55e 100%); border-radius: 7px; width: 0%; box-shadow: 0 0 10px rgba(34, 197, 94, 0.5);"></div>
++                </div>
++              </div>
++            </div>
++            
++            <!-- Column B: Seeds Display Box -->
++            <div style="display: flex; flex-direction: column; background: rgba(255,255,255,0.02); padding: 36px; border-radius: 24px; border: 2px solid rgba(255,255,255,0.05); box-sizing: border-box; height: 100%; justify-content: center;">
++              <h3 id="share-coords-title" style="margin: 0 0 20px 0; font-size: 22px; font-weight: 800; color: #1db954; text-transform: uppercase; letter-spacing: 0.1em; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px;">Coordinates</h3>
++              <ul id="share-seeds-list" style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 18px;">
++                <!-- Populated by JS -->
++              </ul>
++            </div>
++          </div>
++          
++          <!-- Watermark Footer -->
++          <div style="margin-top: 50px; display: flex; justify-content: space-between; align-items: center; z-index: 2; width: 100%;">
++            <div style="font-size: 24px; font-weight: 900; letter-spacing: 0.12em; color: #1db954; text-transform: uppercase;">
++              TRY YOURS AT &rarr; <span id="share-watermark-domain" style="color: #fff; background: rgba(29,185,84,0.1); padding: 4px 12px; border-radius: 6px; border: 1px solid rgba(29,185,84,0.3);">MELODICMAP.APP</span>
++            </div>
++            <div style="width: 48px; height: 48px; border-radius: 50%; background: #1db954; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 20px rgba(29, 185, 84, 0.4);">
++              <div style="width: 18px; height: 18px; background: #000; border-radius: 50%;"></div>
++            </div>
++          </div>
++        </div>
++      </div>
++
++
++      <!-- ── SOCIAL SHARE POPUP MODAL ── -->
++      <div id="share-modal" style="display: none; position: fixed; inset: 0; z-index: 99999; background: rgba(0,0,0,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); justify-content: center; align-items: center; padding: 20px;" onclick="if(event.target === this) closeShareModal()">
++        <div style="background: #0a0f1d; border: 1px solid rgba(255,255,255,0.12); border-radius: 24px; width: min(840px, 100%); max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 30px 60px -12px rgba(0,0,0,0.7); overflow: hidden; animation: modalFadeIn 0.25s ease-out;">
++          <!-- Modal Top Header -->
++          <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 28px; border-bottom: 1px solid rgba(255,255,255,0.08); background: rgba(0,0,0,0.2);">
++            <h2 style="margin: 0; font-size: 20px; font-weight: 850; letter-spacing: -0.01em; color: #fff; display: flex; align-items: center; gap: 8px;">
++              <span class="material-symbols-outlined" style="color: #1db954;">share</span> Share Your Sonic DNA
++            </h2>
++            <button onclick="closeShareModal()" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 32px; font-weight: 300; padding: 0; line-height: 1; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#94a3b8'">&times;</button>
++          </div>
++          
++          <!-- Modal Content Body -->
++          <div style="flex-grow: 1; overflow-y: auto; padding: 28px; display: grid; grid-template-columns: 1fr 1.1fr; gap: 32px; align-items: start;">
++            <!-- Side 1: Graphic Frame View -->
++            <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
++              <div style="position: relative; width: 100%; aspect-ratio: 1080/1350; background: #000; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
++                <img id="share-preview-img" style="width: 100%; height: 100%; object-fit: contain; display: none;" alt="Preview" />
++                <div id="share-preview-loading" style="position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; background: radial-gradient(circle at center, #0f172a 0%, #020617 100%); gap: 16px;">
++                  <div class="spinner" style="width: 42px; height: 42px;"></div>
++                  <span style="color: #94a3b8; font-size: 14px; font-weight: 600; letter-spacing: 0.05em;">Synthesizing graphic...</span>
++                </div>
++              </div>
++              <a id="share-download-btn" href="#" download="my-acoustic-dna.png" class="btn btn-outline" style="width: 100%; text-align: center; font-size: 14px; padding: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; font-weight: 700; opacity: 0.5; pointer-events: none; border-color: rgba(255,255,255,0.15);">
++                <span class="material-symbols-outlined" style="font-size: 18px;">download</span>Download High-Res Image
++              </a>
++            </div>
++            
++            <!-- Side 2: Action Panel -->
++            <div style="display: flex; flex-direction: column; gap: 24px; height: 100%;">
++              <div style="background: rgba(255,255,255,0.03); padding: 16px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);">
++                <h3 style="margin: 0 0 4px 0; font-size: 15px; font-weight: 800; color: #fff; text-transform: uppercase; letter-spacing: 0.05em;">Spread the word</h3>
++                <p style="margin: 0; font-size: 13px; color: #94a3b8; line-height: 1.4;">Invite others to discover their Sonic DNA using mathematical K-Means/KNN auditing.</p>
++              </div>
++              
++              <!-- Grid of Social Intent Buttons -->
++              <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;">
++                <a id="share-platform-twitter" target="_blank" class="btn" style="background: #000; color: white; border: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; font-size: 13px; font-weight: 700; height: 44px;">
++                  <svg style="width: 14px; fill: currentColor;" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg> Twitter / X
++                </a>
++                <a id="share-platform-threads" target="_blank" class="btn" style="background: #000; color: white; border: 1px solid rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; font-size: 13px; font-weight: 700; height: 44px;">
++                  <svg style="width: 16px; fill: currentColor;" viewBox="0 0 24 24"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm5.657 12.343c-.189.58-.533 1.08-1.014 1.467-.482.388-1.068.617-1.726.675-1.237.11-2.412-.363-3.356-1.213-.396.433-.878.78-1.418 1.013-.54.234-1.124.355-1.726.357-1.04-.003-2.03-.427-2.746-1.175C5.277 14.72 4.87 13.72 4.87 12.667c.002-1.093.415-2.138 1.15-2.914.735-.775 1.752-1.214 2.846-1.225.565.002 1.12.114 1.637.33.518.218.985.542 1.375.95.818-.705 1.853-1.096 2.923-1.104.842 0 1.636.236 2.313.69.676.455 1.185 1.104 1.46 1.864.285.773.337 1.61.15 2.412-.186.803-.602 1.533-1.19 2.098z"/></svg> Threads
++                </a>
++                <a id="share-platform-facebook" target="_blank" class="btn" style="background: #1877F2; color: white; border: 0; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; font-size: 13px; font-weight: 700; height: 44px;">
++                   Facebook
++                </a>
++                <a id="share-platform-whatsapp" target="_blank" class="btn" style="background: #25D366; color: white; border: 0; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; font-size: 13px; font-weight: 700; height: 44px;">
++                   WhatsApp
++                </a>
++                <a id="share-platform-pinterest" target="_blank" class="btn" style="background: #bd081c; color: white; border: 0; display: flex; align-items: center; justify-content: center; gap: 10px; cursor: pointer; font-size: 13px; font-weight: 700; height: 44px;">
++                   Pinterest
++                </a>
++                <button id="share-platform-native" class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 13px; height: 44px; border-radius: 8px; opacity: 0.5; cursor: not-allowed;" disabled>
++                  <span class="material-symbols-outlined" style="font-size: 18px;">share</span>System Share
++                </button>
++              </div>
++              
++              <div style="border-top: 1px solid rgba(255,255,255,0.08); margin: 8px 0; flex-grow: 1;"></div>
++              
++              <!-- Action 3: Referral Link Copy Bar -->
++              <div>
++                <h4 style="margin: 0 0 8px 0; font-size: 13px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em;">Copy Referral Link</h4>
++                <div style="display: flex; gap: 8px; width: 100%;">
++                  <input id="share-url-input" type="text" readonly style="flex-grow: 1; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; padding: 12px 14px; color: #fff; font-size: 13px; font-family: monospace;" />
++                  <button id="share-copy-btn" onclick="copyShareLink()" class="btn btn-outline" style="white-space: nowrap; font-size: 13px; font-weight: 700; padding: 0 20px; border-color: rgba(255,255,255,0.2); height: 44px;">Copy</button>
++                </div>
++              </div>
++            </div>
++          </div>
++        </div>
++      </div>
++
++      <!-- ── CLIENT GRAPHIC GENERATION LOGIC ── -->
++      <script>
++        (function() {{
++            let generatedBlob = null;
++            let generatedFile = null;
++
++            window.openShareModal = async function(flowType) {{
++                const modal = document.getElementById('share-modal');
++                const previewImg = document.getElementById('share-preview-img');
++                const loader = document.getElementById('share-preview-loading');
++                const downloadBtn = document.getElementById('share-download-btn');
++                const nativeBtn = document.getElementById('share-platform-native');
++                const urlInput = document.getElementById('share-url-input');
++
++                // 1. Open modal overlay & reset states
++                modal.style.display = 'flex';
++                document.body.style.overflow = 'hidden';
++                previewImg.style.display = 'none';
++                loader.style.display = 'flex';
++                
++                downloadBtn.style.opacity = '0.5';
++                downloadBtn.style.pointerEvents = 'none';
++                nativeBtn.style.opacity = '0.5';
++                nativeBtn.disabled = true;
++                nativeBtn.style.cursor = 'not-allowed';
++
++                // 2. Construct the URL to share
++                const origin = window.location.origin;
++                urlInput.value = origin;
++                document.getElementById('share-watermark-domain').textContent = origin.replace(/^https?:\/\//, '').toUpperCase();
++
++                try {{
++                    // 3. Load variables and populate share card
++                    const target = document.getElementById('share-canvas-target');
++                    const vizContainer = document.getElementById('share-viz-container');
++                    vizContainer.innerHTML = ''; // clear old snapshot
++
++                    let energy = 0;
++                    let valence = 0;
++                    let extraLabel = "Danceability";
++                    let extraVal = 0;
++                    const seedsList = document.getElementById('share-seeds-list');
++                    seedsList.innerHTML = '';
++
++                    if (flowType === 'vibe' && window.vibeData) {{
++                        const data = window.vibeData;
++                        document.getElementById('share-subtitle').textContent = "Acoustic DNA Signature";
++                        document.getElementById('share-coords-title').textContent = "Coordinates";
++
++                        energy = data.anchor.energy || 0;
++                        valence = data.anchor.valence || 0;
++                        extraVal = data.anchor.danceability || 0;
++                        extraLabel = "Danceability";
++
++                        // Take Snapshot of Active Canvas
++                        const origCanvas = document.getElementById('sonic-target-canvas');
++                        if (origCanvas) {{
++                            const img = document.createElement('img');
++                            img.src = origCanvas.toDataURL('image/png');
++                            img.style.width = '100%';
++                            img.style.height = '100%';
++                            img.style.objectFit = 'contain';
++                            vizContainer.appendChild(img);
++                        }}
++
++                        // Display coordinates (top 5 seeds)
++                        const items = data.seeds.slice(0, 5);
++                        items.forEach(s => {{
++                            const li = document.createElement('li');
++                            li.style.fontSize = '18px';
++                            li.style.color = '#e2e8f0';
++                            li.style.fontWeight = '600';
++                            li.style.whiteSpace = 'nowrap';
++                            li.style.overflow = 'hidden';
++                            li.style.textOverflow = 'ellipsis';
++                            li.innerHTML = `<span style="color:#1db954; margin-right:12px;">&bull;</span>${{s.name}} <span style="color:#64748b; font-weight:400; font-size:16px;">- ${{s.artists[0].name}}</span>`;
++                            seedsList.appendChild(li);
++                        }});
++
++                    }} else if (flowType === 'library' && window.clusterData) {{
++                        const data = window.clusterData;
++                        document.getElementById('share-subtitle').textContent = "Mathematical Genre Footprint";
++                        document.getElementById('share-coords-title').textContent = "Core Genres";
++
++                        // Compute global means
++                        let sumE = 0, sumV = 0, total = data.length;
++                        data.forEach(d => {{ sumE += d.energy; sumV += d.valence; }});
++                        energy = sumE / total;
++                        valence = sumV / total;
++                        
++                        extraLabel = "Analyzed Library";
++                        extraVal = 1.0; // placeholder for full completion
++                        
++                        // Clone floating nodes from container
++                        const origContainer = document.getElementById('knn-container');
++                        if (origContainer) {{
++                            const clone = origContainer.cloneNode(true);
++                            clone.removeAttribute('id');
++                            clone.style.width = '100%';
++                            clone.style.height = '100%';
++                            clone.style.border = '0';
++                            // Remove tooltips, repel listeners, axis text from clone to keep visual clean
++                            clone.querySelectorAll('.node-tooltip').forEach(n => n.remove());
++                            vizContainer.appendChild(clone);
++                        }}
++
++                        // Put summaries inside coordinates list
++                        if (window.clusterSummaries) {{
++                            window.clusterSummaries.slice(0, 4).forEach(c => {{
++                                const li = document.createElement('li');
++                                li.style.fontSize = '18px';
++                                li.style.color = '#e2e8f0';
++                                li.style.fontWeight = '600';
++                                li.style.whiteSpace = 'nowrap';
++                                li.style.overflow = 'hidden';
++                                li.style.textOverflow = 'ellipsis';
++                                li.innerHTML = `<span style="color:#1db954; margin-right:12px;">&bull;</span>${{c.label}} <span style="color:#64748b; font-weight:400; font-size:16px;">(${{Math.round(c.share*100)}}%)</span>`;
++                                seedsList.appendChild(li);
++                            }});
++                        }}
++                    }}
++
++                    // 4. Apply loaded metrics stats to the widgets
++                    document.getElementById('share-stat-energy-val').textContent = energy.toFixed(2);
++                    document.getElementById('share-stat-energy-bar').style.width = Math.min(Math.max(energy * 100, 8), 100) + '%';
++
++                    document.getElementById('share-stat-valence-val').textContent = valence.toFixed(2);
++                    document.getElementById('share-stat-valence-bar').style.width = Math.min(Math.max(valence * 100, 8), 100) + '%';
++
++                    document.getElementById('share-stat-extra-label').textContent = extraLabel;
++                    if (extraLabel === "Analyzed Library" && window.clusterData) {{
++                        document.getElementById('share-stat-extra-val').textContent = window.clusterData.length + " tracks";
++                        document.getElementById('share-stat-extra-bar').style.width = '100%';
++                    }} else {{
++                        document.getElementById('share-stat-extra-val').textContent = extraVal.toFixed(2);
++                        document.getElementById('share-stat-extra-bar').style.width = Math.min(Math.max(extraVal * 100, 8), 100) + '%';
++                    }}
++
++                    // 5. Synthesize Graphic into an image
++                    await new Promise(resolve => setTimeout(resolve, 300)); // Allow layout reflow
++                    const canvas = await html2canvas(target, {{
++                        backgroundColor: '#000000',
++                        scale: 2,
++                        useCORS: true,
++                        logging: false
++                    }});
++
++                    // Store blob for file API & download link
++                    const blob = await new Promise(res => canvas.toBlob(res, 'image/png', 0.95));
++                    generatedBlob = blob;
++                    generatedFile = new File([blob], 'melodicmap-signature.png', {{ type: 'image/png' }});
++
++                    const blobUrl = URL.createObjectURL(blob);
++                    previewImg.src = blobUrl;
++                    previewImg.style.display = 'block';
++                    loader.style.display = 'none';
++
++                    // Bind Download link
++                    downloadBtn.href = blobUrl;
++                    downloadBtn.style.opacity = '1';
++                    downloadBtn.style.pointerEvents = 'auto';
++
++                    // Enable Native share if supported
++                    if (navigator.canShare && navigator.canShare({{ files: [generatedFile] }})) {{
++                        nativeBtn.disabled = false;
++                        nativeBtn.style.opacity = '1';
++                        nativeBtn.style.cursor = 'pointer';
++                        nativeBtn.onclick = async function() {{
++                            try {{
++                                await navigator.share({{
++                                    title: 'My Acoustic Landscape',
++                                    text: 'Check out my sonic fingerprint on MelodicMap! 🎵',
++                                    url: origin,
++                                    files: [generatedFile]
++                                }});
++                            }} catch(e) {{ console.log('Share cancelled/failed', e); }}
++                        }};
++                    }}
++
++                    // 6. Prepare Platform Intent Links
++                    const shareText = encodeURIComponent("Just generated my Acoustic DNA on MelodicMap! Explore your sonic signature mathematically here 🎵 👇\\n\\n");
++                    const shareUrl = encodeURIComponent(origin);
++
++                    document.getElementById('share-platform-twitter').href = `https://twitter.com/intent/tweet?text=${{shareText}}&url=${{shareUrl}}`;
++                    document.getElementById('share-platform-threads').href = `https://www.threads.net/intent/post?text=${{shareText}}%20${{shareUrl}}`;
++                    document.getElementById('share-platform-facebook').href = `https://www.facebook.com/sharer/sharer.php?u=${{shareUrl}}`;
++                    document.getElementById('share-platform-whatsapp').href = `https://api.whatsapp.com/send?text=${{shareText}}%20${{shareUrl}}`;
++                    document.getElementById('share-platform-pinterest').href = `https://pinterest.com/pin/create/button/?url=${{shareUrl}}&description=${{shareText}}`;
++
++                }} catch (err) {{
++                    console.error('Synthesis failure', err);
++                    loader.innerHTML = '<span style="color:#ef4444; text-align:center;">Failed to render graphic.<br>Try taking a screenshot!</span>';
++                }}
++            }};
++
++            window.closeShareModal = function() {{
++                document.getElementById('share-modal').style.display = 'none';
++                document.body.style.overflow = '';
++            }};
++
++            window.copyShareLink = async function() {{
++                const urlInput = document.getElementById('share-url-input');
++                const copyBtn = document.getElementById('share-copy-btn');
++                try {{
++                    await navigator.clipboard.writeText(urlInput.value);
++                    const origText = copyBtn.innerText;
++                    copyBtn.innerText = 'Copied!';
++                    copyBtn.style.background = '#1db954';
++                    copyBtn.style.color = '#000';
++                    setTimeout(() => {{
++                        copyBtn.innerText = origText;
++                        copyBtn.style.background = '';
++                        copyBtn.style.color = '';
++                    }}, 2000);
++                }} catch(e) {{
++                    alert('Link copied: ' + urlInput.value);
++                }}
++            }};
++          }})();
++      </script>
+     </body>
+     </html>
+     """

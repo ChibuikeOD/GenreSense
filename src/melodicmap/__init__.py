@@ -1,2 +1,2 @@
-"""GenreSense application package."""
+"""MelodicMap application package."""
 

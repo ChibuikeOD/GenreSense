@@ -27,6 +27,13 @@ class AnalysisPersistence:
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS shared_graphics (
+                        share_id TEXT PRIMARY KEY,
+                        image_data BYTEA,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                """)
             conn.commit()
 
     def save(self, user_id: str, analysis: 'LibraryAnalysis'):
@@ -53,7 +60,7 @@ class AnalysisPersistence:
 
     def load(self, user_id: str) -> 'LibraryAnalysis | None':
         from app import LibraryAnalysis
-        from genresense.recommendations import GenreClusterResult, ClusterSummary, ClusterDiagnostics
+        from melodicmap.recommendations import GenreClusterResult, ClusterSummary, ClusterDiagnostics
 
         with psycopg2.connect(self.dsn) as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -98,3 +105,22 @@ class AnalysisPersistence:
             "diagnostics": vars(result.diagnostics),
             "scaled_feature_columns": result.scaled_feature_columns
         }
+
+    def save_share_graphic(self, share_id: str, image_bytes: bytes):
+        with psycopg2.connect(self.dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO shared_graphics (share_id, image_data, created_at)
+                    VALUES (%s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (share_id) DO NOTHING;
+                """, (share_id, psycopg2.Binary(image_bytes)))
+            conn.commit()
+
+    def load_share_graphic(self, share_id: str) -> bytes | None:
+        with psycopg2.connect(self.dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT image_data FROM shared_graphics WHERE share_id = %s", (share_id,))
+                row = cur.fetchone()
+                if row:
+                    return bytes(row[0])
+        return None
