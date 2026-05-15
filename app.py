@@ -836,8 +836,7 @@ def _dashboard_html(
 
         <div style="margin-top:40px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
             <div>
-                <h2 style="color:#f8fafc; font-size:24px; font-weight:800; margin-bottom:16px; display:flex; align-items:center; gap:8px;">
-                    <span class="material-symbols-outlined text-[#1db954]">playlist_play</span>
+                <h2 style="color:#f8fafc; font-size:24px; font-weight:800; margin-bottom:16px;">
                     Your Acoustic Neighbourhood
                 </h2>
                 <div style="display:grid; gap:12px;">
@@ -856,8 +855,7 @@ def _dashboard_html(
                 </div>
             </div>
             <div>
-                <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:16px; display:flex; align-items:center; gap:8px;">
-                    <span class="material-symbols-outlined text-[#1db954]">graphic_eq</span>
+                <h3 style="color:#f8fafc; font-size:18px; font-weight:700; margin-bottom:16px;">
                     Your songs
                 </h3>
                 <div style="display:grid; gap:12px;">
