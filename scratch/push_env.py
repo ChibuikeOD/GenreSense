@@ -5,7 +5,7 @@ env_vars = {
     "FLASK_SECRET_KEY": "dYiOqO0_iJ6Fx6mo5r9hFCa7iq-bhTAkAEjW0dVIovkU2EVoXrQdsL2wVb8vhze4",
     "SPOTIFY_CLIENT_ID": "26b27563491844389dd5d1aaaca342f7",
     "SPOTIFY_CLIENT_SECRET": "e3f0efa32f5f43979179ec0aa7ba3619",
-    "SPOTIFY_REDIRECT_URI": "https://genre-pay.vercel.app/callback",
+    "SPOTIFY_REDIRECT_URI": "https://melodic-map.vercel.app/callback",
     "SPOTIFY_SCOPE": "user-library-read playlist-modify-public playlist-modify-private",
     "POSTGRES_DSN": "postgresql://postgres.rrqqicohxdjkvbgrngww:Tyler-Joseph21@aws-1-us-east-1.pooler.supabase.com:5432/postgres",
     "POSTGRES_DATASET_NAME": "MelodicMap",
