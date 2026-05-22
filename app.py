@@ -277,6 +277,8 @@ def _config_error_page(error_message: str) -> str:
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>MelodicMap Configuration Error</title>
+      <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3150975751363943"
+        crossorigin="anonymous"></script>
       <style>
         body {{ font-family: Arial, sans-serif; max-width: 760px; margin: 48px auto; padding: 0 16px; color: #1f2937; }}
         .card {{ border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; background: #fff; }}
@@ -1071,6 +1073,8 @@ def _dashboard_html(
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>MelodicMap Dashboard</title>
+      <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3150975751363943"
+        crossorigin="anonymous"></script>
       <style>
         body {{ font-family: Inter, Arial, sans-serif; margin: 0; background: #064e3b; color: #fff; }}
         .wrap {{ max-width: 1100px; margin: 0 auto; padding: 26px 18px 42px; }}
@@ -1622,6 +1626,8 @@ def _starting_pipeline_html(profile: dict[str, Any], auto_submit: bool = False) 
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
       <title>Analyzing Library - MelodicMap</title>
+      <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3150975751363943"
+        crossorigin="anonymous"></script>
       <style>
         body {{ font-family: Inter, Arial, sans-serif; margin: 0; background: #064e3b; color: #fff; }}
         .wrap {{ min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 24px; padding: 24px; box-sizing: border-box; }}
@@ -2134,6 +2140,8 @@ def share_view(share_id: str) -> Any:
         <meta charset="utf-8"/>
         <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
         <title>MelodicMap - Acoustic DNA Signature</title>
+        <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3150975751363943"
+            crossorigin="anonymous"></script>
         
         <!-- Open Graph / Facebook / general metadata -->
         <meta property="og:type" content="website">
